@@ -81,7 +81,7 @@ function corsHeaders(request, env) {
   const origin = request.headers.get('origin') || '';
   const allowed = (env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
   const h = { 'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS', 'access-control-allow-headers': 'authorization, content-type, range', 'access-control-expose-headers': 'content-length, content-range, etag', 'vary': 'origin' };
-  if (allowed.includes(origin)) h['access-control-allow-origin'] = origin;
+  if (allowed.includes(origin) || /^https:\/\/elev-planejamento(-[a-z0-9-]+)?\.vercel\.app$/.test(origin)) h['access-control-allow-origin'] = origin;
   return h;
 }
 function json(body, status, cors) {

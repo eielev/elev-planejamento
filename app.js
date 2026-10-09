@@ -1220,11 +1220,13 @@ async function saveClient(){
     let logo = e.logo;
     if(e.logoPending){
       const path = (MEDIA_BASE ? 'r2:' : '') + `${id}/${uid()}.${e.logoPending.ext}`;
-      await uploadBlob(path, e.logoPending.blob); logo = path;
+      try { await uploadBlob(path, e.logoPending.blob); }
+      catch(err){ err.step = 'ao enviar a logo'; throw err; }
+      logo = path;
     }
     const row = { id, name: e.name, name_key: key, slug: e.id ? e.slug : uniqueSlug(e.name), logo, colors: e.colors.filter(x => HEX_RE.test(x)).map(normHex), updated_at: new Date().toISOString() };
     const { error } = await sb.from('clients').upsert(row);
-    if(error) throw error;
+    if(error){ error.step = 'ao gravar no banco de dados'; throw error; }
     if(old?.logo && old.logo !== logo) removeFiles([old.logo]).catch(() => {});
     if(old && old.name !== row.name) await sb.from('plans').update({ client: row.name, client_key: key }).eq('client_id', id);
     await loadClients();
@@ -1235,7 +1237,9 @@ async function saveClient(){
     render(true);
   } catch(err){
     e.saving = false; render(true);
-    toast(/duplicate|unique/i.test(err?.message || '') ? 'Já existe um cliente com esse nome ou link.' : errMsg(err), true);
+    const detail = String(err?.message || err || '').slice(0, 120);
+    toast(/duplicate|unique/i.test(detail) ? 'Já existe um cliente com esse nome ou link.' : `Não foi possível salvar o cliente${err?.step ? ' ' + err.step : ''}. Detalhe: ${detail}`, true, 15000);
+    console.error('saveClient', err);
   }
 }
 async function deleteClient(){
