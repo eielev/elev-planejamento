@@ -434,7 +434,7 @@ function editPage(){
       <button class="abtn" data-a="add" data-type="carrossel"><span class="plus">+</span>Carrossel</button>
       <button class="abtn" data-a="add" data-type="reels"><span class="plus">+</span>Reels</button>
       <button class="abtn" data-a="add" data-type="story"><span class="plus">+</span>Story</button>
-      ${posts.length > 1 ? `<span class="hint" style="margin-left:auto">Ao salvar, os conteúdos são ordenados por data e renumerados.</span>` : ''}
+      ${posts.length > 1 ? `<span class="hint" style="margin-left:auto">Os conteúdos se organizam pela data automaticamente.</span>` : ''}
     </div>`;
   const list = posts.length ? posts.map((p,i) => ecard(p, i, posts.length)).join('') : `<div class="empty-edit">
       <span>Nenhum conteúdo ainda. Escolha o formato do primeiro:</span>
@@ -737,10 +737,11 @@ app.addEventListener('change', e => {
   if(el.dataset.f === 'dateTxt'){
     const p = getPost(el.closest('[data-card]')?.dataset.card); if(!p) return;
     const raw = el.value.trim();
-    if(!raw){ p.date = ''; el.classList.remove('bad'); markDirty(); return; }
+    if(!raw){ p.date = ''; el.classList.remove('bad'); markDirty(); reorderLive(p.id); return; }
     const iso = parseBrDate(raw);
     if(!iso){ el.classList.add('bad'); toast('Data não reconhecida. Use dia/mês, por exemplo 13/10 ou 13/10/27.', true); return; }
     p.date = iso; el.value = isoToBr(iso); el.classList.remove('bad'); markDirty();
+    reorderLive(p.id);
   }
   if(el.dataset.f === 'videoUrl'){ const p = getPost(el.closest('[data-card]')?.dataset.card); if(p){ p.videoUrl = el.value.trim(); if(p.videoUrl && p.video){ dropPath(p.video); p.video = null; } render(true); } }
 });
@@ -803,6 +804,20 @@ function sortByDate(){
   const list = [...cur.posts].sort((x,y) => (x.date || '9999-99-99').localeCompare(y.date || '9999-99-99') || (parseInt(x.num)||999) - (parseInt(y.num)||999));
   list.forEach((q,k) => q.num = String(k + 1));
   cur.posts = list;
+}
+function reorderLive(id){
+  const sig = () => cur.posts.map(p => p.id + ':' + p.num).join(',');
+  const before = sig();
+  sortByDate();
+  if(sig() === before) return;
+  render(true);
+  const card = document.querySelector(`[data-card="${id}"]`);
+  if(card){
+    card.classList.add('moved');
+    card.scrollIntoView({ behavior:'smooth', block:'center' });
+    setTimeout(() => card.classList.remove('moved'), 1600);
+    document.getElementById('cap-' + id)?.focus({ preventScroll:true });
+  }
 }
 async function save(){
   if(saving || !dirty || !cur) return;
