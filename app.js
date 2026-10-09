@@ -1094,8 +1094,7 @@ async function sendToTrello(){
     const cards = sortPosts(cur.posts).map(p => ({
       postId: p.id, cardId: known[p.id]?.id || null,
       name: trelloCardName(cur, p), desc: trelloDesc(cur, p),
-      due: p.date ? `${p.date}T15:00:00.000Z` : null,
-      coverUrl: absUrl(p.type === 'reels' ? p.cover : p.images[0])
+      due: p.date ? `${p.date}T15:00:00.000Z` : null
     }));
     const res = await mediaApi('/trello/cards', { cards });
     if(res.error) throw new Error(res.error);
