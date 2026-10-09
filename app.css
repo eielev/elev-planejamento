@@ -306,3 +306,75 @@ img{max-width:100%}
 .prow.pick input{width:18px; height:18px; accent-color:var(--danger)}
 .prow.pick.on{background:var(--danger-bg)}
 .sbtn:disabled{opacity:.45; cursor:default}
+
+/* ---------- clientes ---------- */
+.combo{position:relative}
+.combo-wrap{position:relative}
+.combo-wrap .ccard-logo.in{position:absolute; left:10px; top:50%; transform:translateY(-50%)}
+.inp.with-logo{padding-left:50px}
+.combo-list{position:absolute; z-index:30; left:0; right:0; top:calc(100% - 4px); background:var(--card); border:1px solid var(--line-strong); border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,.14); padding:6px; display:flex; flex-direction:column; gap:2px; max-height:320px; overflow:auto}
+.combo-opt{display:flex; align-items:center; gap:10px; border:0; background:none; text-align:left; padding:8px 10px; border-radius:7px; cursor:pointer; font-size:14.5px}
+.combo-opt:hover,.combo-opt:focus-visible{background:var(--surface)}
+.combo-opt .sw{margin-left:auto}
+.combo-opt.add{color:var(--ink); font-weight:600; border-top:1px solid var(--line); border-radius:0 0 7px 7px}
+.combo-empty{padding:10px; color:var(--muted); font-size:13px}
+.ccard-logo{width:44px; height:44px; flex:none; border-radius:10px; border:1px solid var(--line); background:var(--card); display:grid; place-items:center; overflow:hidden}
+.ccard-logo img{width:100%; height:100%; object-fit:contain; padding:4px}
+.ccard-logo b{font-size:18px; color:var(--muted)}
+.ccard-logo.sm{width:30px; height:30px; border-radius:7px}
+.ccard-logo.sm b{font-size:13px}
+.sw{display:inline-flex; gap:3px}
+.sw i{width:14px; height:14px; border-radius:4px; border:1px solid rgba(0,0,0,.12); display:block}
+.cgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px}
+.ccard{display:flex; align-items:center; gap:12px; text-align:left; border:1px solid var(--line); background:var(--card); border-radius:12px; padding:14px; cursor:pointer}
+.ccard:hover{border-color:var(--accent)}
+.ccard-txt{display:flex; flex-direction:column; min-width:0; flex:1}
+.ccard-txt b{font-size:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.ccard-txt small{color:var(--muted); font-size:12.5px; font-family:var(--mono)}
+.brand-toggle{display:flex; align-items:center; gap:10px; border:1px solid var(--line-strong); background:var(--card); border-radius:8px; padding:12px; cursor:pointer; font-size:14px; min-height:50px}
+.brand-toggle input{width:18px; height:18px; accent-color:var(--accent)}
+.modal.cmodal{max-width:900px}
+.cm-grid{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,340px); gap:24px; align-items:start}
+@media (max-width:760px){ .cm-grid{grid-template-columns:minmax(0,1fr)} }
+.cm-form{display:flex; flex-direction:column; gap:16px; min-width:0}
+.cm-logo-row{display:flex; align-items:center; gap:12px}
+.cm-logo{width:88px; height:88px; padding:6px; flex:none}
+.cm-logo img{max-width:100%; max-height:100%; object-fit:contain}
+.crows{display:flex; flex-direction:column; gap:8px}
+.crow{display:grid; grid-template-columns:44px 104px minmax(0,1fr) 30px; gap:10px; align-items:center}
+.cpick{width:44px; height:40px; border:1px solid var(--line-strong); border-radius:8px; padding:3px; background:var(--card); cursor:pointer}
+.chex{font-family:var(--mono); font-size:13.5px; padding:8px 10px; text-transform:uppercase}
+.crole{display:flex; flex-direction:column; font-size:12.5px; color:var(--muted); line-height:1.3}
+.crole b{color:var(--ink); font-size:13px}
+.cm-prev{display:flex; flex-direction:column; gap:8px; position:sticky; top:0}
+/* mini página de exemplo */
+.bp{border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--bg); font-size:12px}
+.bp-hero{display:flex; gap:10px; align-items:center; padding:16px 14px; border-bottom:1px solid var(--line)}
+.bp-hero small{display:block; font-family:var(--mono); font-size:8.5px; letter-spacing:.08em; color:var(--muted)}
+.bp-hero b{display:block; font-size:17px; letter-spacing:-.02em; line-height:1.15}
+.bp-hero em{font-style:normal; color:var(--muted); font-size:11.5px}
+.bp-logo{width:40px; height:40px; border-radius:9px; border:1px solid var(--line); background:var(--card); overflow:hidden; display:grid; place-items:center; flex:none}
+.bp-logo:empty{display:none}
+.bp-logo img{width:100%; height:100%; object-fit:contain; padding:3px}
+.bp-body{padding:12px 14px; display:flex; flex-direction:column; gap:10px}
+.bp-meta{display:flex; align-items:center; gap:8px}
+.bp-num{font-family:var(--mono); font-weight:500}
+.bp-meta .chip{font-size:11px; padding:1px 7px 1px 6px}
+.bp-card{display:grid; grid-template-columns:64px 1fr; gap:10px}
+.bp-img{aspect-ratio:9/16; border-radius:6px; background:var(--surface); border:1px solid var(--line)}
+.bp-lines{display:flex; flex-direction:column; gap:6px; padding-top:4px}
+.bp-lines i{height:6px; border-radius:3px; background:var(--line)}
+.bp-watch{display:flex; align-items:center; justify-content:center; gap:6px; padding:8px; border-radius:6px; background:var(--accent); color:var(--on-accent); font-weight:600}
+.bp-watch .play{border-left-width:7px; border-top-width:4px; border-bottom-width:4px}
+.bp-legend{display:flex; flex-direction:column; gap:5px; padding:10px 14px; border-top:1px solid var(--line); color:var(--muted)}
+.bp-legend span{display:flex; align-items:center; gap:7px}
+.bp-legend i{width:12px; height:12px; border-radius:3px; border:1px solid rgba(0,0,0,.12)}
+
+/* página com as cores do cliente */
+.branded .hero,.branded .bp-hero{background:color-mix(in srgb, var(--brand2) 14%, var(--bg)); border-top:4px solid var(--brand)}
+.branded .chip{background:color-mix(in srgb, var(--brand) 12%, var(--card)); border-color:color-mix(in srgb, var(--brand) 40%, var(--line))}
+.branded .vnum,.branded .stats dd,.branded .bp-num{color:color-mix(in srgb, var(--brand) 78%, var(--ink))}
+.branded .watch,.branded .watch-inline,.branded .bp-watch{background:var(--brand); color:var(--brand-ink)}
+.branded .car-dots span.on{background:var(--brand)}
+.branded .clogo{border-color:color-mix(in srgb, var(--brand) 35%, var(--line))}
+.branded th{background:color-mix(in srgb, var(--brand2) 10%, var(--surface))}

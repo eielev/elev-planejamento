@@ -3,8 +3,8 @@
 // POST /sign               devolve um endereço temporário para enviar um arquivo (só equipe logada)
 // POST /delete             apaga arquivos ou uma pasta inteira (só equipe logada)
 
-const KEY_RE = /^p[a-z0-9]{12,}\/[a-z0-9]{6,}\.(webp|jpg|jpeg|png|svg|gif|mp4|webm|mov)$/;
-const PREFIX_RE = /^p[a-z0-9]{12,}\/$/;
+const KEY_RE = /^[pc][a-z0-9]{12,}\/[a-z0-9]{6,}\.(webp|jpg|jpeg|png|svg|gif|mp4|webm|mov)$/;
+const PREFIX_RE = /^[pc][a-z0-9]{12,}\/$/;
 
 export default {
   async fetch(request, env) {

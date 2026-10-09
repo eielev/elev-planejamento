@@ -17,7 +17,7 @@ const MAX_VIDEO = MEDIA_BASE ? 2 * 1024 * 1024 * 1024 : 50 * 1024 * 1024;
 const MAX_VIDEO_LABEL = MEDIA_BASE ? '2 GB' : '50 MB';
 const CAP_BYTES = (cfg.STORAGE_GB || (MEDIA_BASE ? 10 : 1)) * 1024 * 1024 * 1024;
 const KEEP_PER_CLIENT = 3;
-const RESERVED = new Set(['p', 'editar', 'novo', 'planejamentos', 'login', 'sair', 'api', 'assets']);
+const RESERVED = new Set(['p', 'editar', 'novo', 'planejamentos', 'clientes', 'login', 'sair', 'api', 'assets']);
 
 /* ---------- estado ---------- */
 let view = 'boot';            // boot | login | none | client | home | list | edit
@@ -54,8 +54,10 @@ const slugify = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g
 const clientSlug = name => { let s = slugify(name) || 'cliente'; if(RESERVED.has(s)) s += '-cliente'; return s; };
 const linkFor = id => `${location.origin}/p/${id}`;
 const fixedLinkFor = slug => `${location.origin}/${slug}`;
-const isLatestOfClient = r => !index.some(x => x.clientKey === r.clientKey && x.clientKey && (x.createdAt || '') > (r.createdAt || ''));
-const bestLink = r => (r.slug && isLatestOfClient(r)) ? fixedLinkFor(r.slug) : linkFor(r.id);
+const sameClient = (a, b) => (a.clientId && b.clientId) ? a.clientId === b.clientId : (!!a.clientKey && a.clientKey === b.clientKey);
+const isLatestOfClient = r => !index.some(x => x.id !== r.id && sameClient(x, r) && (x.createdAt || '') > (r.createdAt || ''));
+const slugOf = r => clientById(r.clientId)?.slug || r.slug;
+const bestLink = r => (slugOf(r) && isLatestOfClient(r)) ? fixedLinkFor(slugOf(r)) : linkFor(r.id);
 function fmtDate(iso){
   if(!iso) return '';
   const [y,m,d] = iso.split('-').map(Number);
@@ -136,9 +138,9 @@ async function copyText(text, btn){
 /* ---------- limite de planejamentos por cliente ---------- */
 // Outros planejamentos do mesmo cliente, mais recentes primeiro, e quantos precisam sair para caber no limite.
 function clientSiblings(plan){
-  const key = clientKey(plan.client);
-  if(!key) return [];
-  return index.filter(r => r.id !== plan.id && r.clientKey === key).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const me = { id: plan.id, clientId: plan.clientId, clientKey: clientKey(plan.client) };
+  if(!me.clientId && !me.clientKey) return [];
+  return index.filter(r => r.id !== plan.id && sameClient(r, me)).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 }
 function excessFor(plan){ return Math.max(0, clientSiblings(plan).length + 1 - KEEP_PER_CLIENT); }
 function pruneHintHtml(){
@@ -188,11 +190,13 @@ function render(keepScroll){
   if(view === 'boot') html = topBar(false) + `<div class="wrap center-msg"><span>Carregando…</span></div>`;
   else if(view === 'login') html = topBar(false) + loginPage() + footer(null);
   else if(view === 'none') html = (session ? clientBar() : '') + topBar(false) + `<div class="wrap center-msg"><b>Planejamento não encontrado</b><span>Confira se o link está completo ou peça um novo link à equipe da Elev.</span></div>` + footer(null);
-  else if(view === 'client') html = (session ? clientBar() : '') + topBar(false) + planView(cur) + footer(cur);
+  else if(view === 'client') html = (session ? clientBar() : '') + topBar(false) + planViewBranded(cur) + footer(cur);
   else if(view === 'home') html = topBar(true) + homePage() + footer(null);
   else if(view === 'list') html = topBar(true) + listPage() + footer(null);
-  else if(view === 'edit') html = editBar() + topBar(false) + (preview ? planView(cur) : editPage()) + footer(cur);
+  else if(view === 'clients') html = topBar(true) + clientsPage() + footer(null);
+  else if(view === 'edit') html = editBar() + topBar(false) + (preview ? planViewBranded(cur) : editPage()) + footer(cur);
   if(view === 'edit' && pruneAsk) html += pruneModal();
+  if(clientEdit && (view === 'clients' || view === 'edit')) html += clientModal();
   app.innerHTML = html;
   wireCarousels();
   autosizeAll();
@@ -202,7 +206,7 @@ function render(keepScroll){
 }
 function topBar(nav){
   return `<header class="top"><div class="wrap">${elevSvg()}<span class="sep"></span><span class="t">${nav ? 'Painel de planejamentos' : 'Planejamento de conteúdo'}</span>
-    ${nav ? `<nav class="nav"><button class="${view==='home'?'on':''}" data-a="go-home">Início</button><button class="${view==='list'?'on':''}" data-a="go-list">Planejamentos</button><button data-a="logout" title="${esc(session?.user?.email || '')}">Sair</button></nav>` : ''}
+    ${nav ? `<nav class="nav"><button class="${view==='home'?'on':''}" data-a="go-home">Início</button><button class="${view==='list'?'on':''}" data-a="go-list">Planejamentos</button><button class="${view==='clients'?'on':''}" data-a="go-clients">Clientes</button><button data-a="logout" title="${esc(session?.user?.email || '')}">Sair</button></nav>` : ''}
   </div></header>`;
 }
 function clientBar(){
@@ -320,11 +324,12 @@ function sorted(P){
 function chip(type){ return `<span class="chip ${type}"><i></i>${TYPES[type]}</span>`; }
 function isToRecord(p){ return p.type === 'reels' && !p.video && !p.videoUrl; }
 
+function planViewBranded(P){ const st = brandStyle(P); return st ? `<div class="branded" style="${st}">${planView(P)}</div>` : planView(P); }
 function planView(P){
   const c = counts(P), posts = sorted(P);
   const hero = `<section class="hero"><div class="wrap">
     <div class="hero-row">
-      ${P.logo ? `<div class="clogo"><img src="${esc(src(P.logo))}" alt="Logo ${esc(P.client)}"></div>` : ''}
+      ${brandOf(P).logo ? `<div class="clogo"><img src="${esc(src(brandOf(P).logo))}" alt="Logo ${esc(P.client)}"></div>` : ''}
       <div style="min-width:0">
         <p class="lbl">Planejamento de conteúdo</p>
         <h1 class="${P.client ? '' : 'ph'}">${esc(P.client || 'Nome do cliente')}</h1>
@@ -437,15 +442,21 @@ function footer(P){
 function editPage(){
   const P = cur, posts = sorted(P);
   const ph = pruneHintHtml();
-  const slug = clientSlug(P.client);
-  const latest = !isNew && isLatestOfClient({ id:P.id, clientKey:clientKey(P.client), createdAt:P.createdAt });
+  const cl = clientById(P.clientId);
+  const slug = cl?.slug || clientSlug(P.client);
+  const latest = !isNew && isLatestOfClient({ id:P.id, clientId:P.clientId, clientKey:clientKey(P.client), createdAt:P.createdAt });
   const cf = (text, label) => `<div class="copyfield"><code>${esc(text)}</code><button class="cbtn" data-a="copytext" data-text="${esc(text)}" aria-label="Copiar ${label}" title="Copiar">${COPY_ICON}</button></div>`;
   const setup = `<section><div class="wrap"><div class="setup">
-    <div class="fld"><label class="lbl" for="f-client">Cliente</label><input class="inp big" id="f-client" data-g="client" value="${esc(P.client)}" autocomplete="off"></div>
+    <div class="fld combo"><label class="lbl" for="f-client">Cliente</label>
+      <div class="combo-wrap">${cl?.logo ? `<span class="ccard-logo sm in">${`<img src="${esc(src(cl.logo))}" alt="">`}</span>` : ''}<input class="inp big ${cl?.logo ? 'with-logo' : ''}" id="f-client" value="${esc(P.client)}" autocomplete="off" placeholder="Busque ou cadastre" role="combobox" aria-expanded="false"></div>
+      <div class="combo-list" id="combo-list" hidden></div>
+      ${cl ? `<button class="lnk" data-a="edit-client" style="align-self:flex-start">Editar cliente (logo e cores)</button>` : ''}
+    </div>
     <div class="fld"><label class="lbl" for="f-period">Mês ou período</label><input class="inp big" id="f-period" data-g="period" value="${esc(P.period)}" placeholder="${esc(periodExample())}" autocomplete="off"></div>
-    <div class="fld"><span class="lbl">Logo (opcional)</span>
-      <label class="drop logo-drop" data-up="logo">${P.logo ? `<img src="${esc(src(P.logo))}" alt="Logo do cliente">` : '<span>Arraste ou <strong>escolha</strong></span>'}<input type="file" accept="image/*" data-up="logo" id="up-logo"></label>
-      ${P.logo ? `<div class="mini-actions"><button class="lnk danger" data-a="rm-logo">Remover logo</button></div>` : ''}
+    <div class="fld"><span class="lbl">Cores da página</span>
+      ${cl && (cl.colors || []).length
+        ? `<label class="brand-toggle"><input type="checkbox" id="f-usebrand" ${P.useBrand !== false ? 'checked' : ''}><span class="sw">${cl.colors.slice(0,2).map(x => `<i style="background:${esc(normHex(x))}"></i>`).join('')}</span>Usar as cores do cliente</label>`
+        : `<p class="hint" style="margin:0">${cl ? 'Este cliente não tem cores cadastradas: a página usa o padrão Elev.' : 'Escolha o cliente para ver as opções.'}</p>`}
     </div>
   </div>
   <p class="prune" id="prune" ${ph ? '' : 'hidden'}>${ph}</p>
@@ -603,6 +614,17 @@ function dropPath(path){
 }
 async function handleFiles(kind, id, fileList){
   const files = [...fileList].filter(Boolean);
+  if(kind === 'clogo'){
+    const img = files.find(f => f.type.startsWith('image/'));
+    if(!img || !clientEdit) return toast('Escolha um arquivo de imagem para a logo.', true);
+    try {
+      const { blob, ext } = await processImage(img, { max:600, keepAlpha:true });
+      clientEdit.logoPending = { blob, ext }; clientEdit.logoUrl = URL.createObjectURL(blob);
+      clientEdit.name = document.getElementById('c-name')?.value ?? clientEdit.name;
+      render(true);
+    } catch(e){ toast('Não consegui ler essa imagem. Tente PNG ou JPG.', true); }
+    return;
+  }
   if(!files.length || !cur) return;
   const p = id ? getPost(id) : null;
   try {
@@ -646,7 +668,7 @@ function startNew(){
   requestAnimationFrame(() => document.getElementById('f-client')?.focus());
 }
 function rowToPlan(row){
-  const plan = normalize(Object.assign({}, row.data || {}, { id: row.id, client: row.client, period: row.period, createdAt: row.created_at }));
+  const plan = normalize(Object.assign({}, row.data || {}, { id: row.id, client: row.client, period: row.period, createdAt: row.created_at, clientId: row.client_id || null, brandInfo: row.client_info || null }));
   plan.posts = sortPosts(plan.posts);
   return plan;
 }
@@ -698,6 +720,19 @@ app.addEventListener('click', e => {
   switch(a){
     case 'go-home': resetWork(); cur = null; go('home', '/'); break;
     case 'go-list': go('list', '/planejamentos'); break;
+    case 'go-clients': if(!clientsReady) loadClients(); go('clients', '/clientes'); break;
+    case 'client-new': openClientModal(null); break;
+    case 'client-edit': openClientModal(clientById(t.dataset.id)); break;
+    case 'edit-client': openClientModal(clientById(cur?.clientId), { fromPlan:true }); break;
+    case 'pick-client': { const c = clientById(t.dataset.id); if(c && cur){ cur.clientId = c.id; cur.client = c.name; markDirty(); render(true); } break; }
+    case 'new-client-from': openClientModal(null, { name: document.getElementById('f-client')?.value.trim() || '', fromPlan:true }); break;
+    case 'cm-close': clientEdit = null; render(true); break;
+    case 'cm-bg': if(e.target === t){ clientEdit = null; render(true); } break;
+    case 'cm-save': saveClient(); break;
+    case 'cm-delete': if(clientEdit.delArm) deleteClient(); else { clientEdit.delArm = true; render(true); } break;
+    case 'cm-addcolor': if(clientEdit.colors.length < 5){ clientEdit.name = document.getElementById('c-name')?.value ?? clientEdit.name; clientEdit.colors.push(clientEdit.colors.length ? '#888888' : '#1e5bb8'); render(true); } break;
+    case 'cm-rmcolor': clientEdit.name = document.getElementById('c-name')?.value ?? clientEdit.name; clientEdit.colors.splice(+t.dataset.i, 1); render(true); break;
+    case 'cm-rmlogo': clientEdit.name = document.getElementById('c-name')?.value ?? clientEdit.name; clientEdit.logo = null; clientEdit.logoPending = null; clientEdit.logoUrl = null; render(true); break;
     case 'logout': sb.auth.signOut(); break;
     case 'new': startNew(); break;
     case 'open': openPlan(planId); break;
@@ -759,6 +794,15 @@ app.addEventListener('click', e => {
 });
 app.addEventListener('input', e => {
   const el = e.target;
+  if(clientEdit){
+    if(el.id === 'c-name'){ clientEdit.name = el.value; const h = document.getElementById('cm-t'); if(h) h.textContent = el.value || 'Cliente'; refreshPreview(); return; }
+    if(el.dataset.ci != null){ const i = +el.dataset.ci; clientEdit.colors[i] = normHex(el.value); const hx = document.querySelector(`[data-ch="${i}"]`); if(hx) hx.value = normHex(el.value).toUpperCase(); refreshPreview(); return; }
+    if(el.dataset.ch != null){ const i = +el.dataset.ch; el.classList.toggle('bad', !HEX_RE.test(el.value)); if(HEX_RE.test(el.value)){ clientEdit.colors[i] = normHex(el.value); const pk = document.querySelector(`[data-ci="${i}"]`); if(pk) pk.value = normHex(el.value); refreshPreview(); } return; }
+  }
+  if(el.id === 'f-client' && cur){
+    cur.client = el.value; const m = clientByKey(clientKey(el.value)); cur.clientId = m ? m.id : null;
+    markDirty(); showCombo(); return;
+  }
   if(!cur) return;
   if(el.dataset.g){ cur[el.dataset.g] = el.value; markDirty(); return; }
   const f = el.dataset.f; if(!f) return;
@@ -771,6 +815,7 @@ app.addEventListener('input', e => {
 });
 app.addEventListener('change', e => {
   const el = e.target;
+  if(el.id === 'f-usebrand' && cur){ cur.useBrand = el.checked; markDirty(); return; }
   if(el.type === 'file' && el.dataset.up === 'import'){ importPlan(el.files[0]); el.value = ''; return; }
   if(el.type === 'file' && el.dataset.up){ handleFiles(el.dataset.up, el.dataset.id, el.files); el.value = ''; return; }
   if(el.dataset.f === 'num'){ render(true); }
@@ -786,6 +831,7 @@ app.addEventListener('change', e => {
   if(el.dataset.f === 'videoUrl'){ const p = getPost(el.closest('[data-card]')?.dataset.card); if(p){ p.videoUrl = el.value.trim(); if(p.videoUrl && p.video){ dropPath(p.video); p.video = null; } render(true); } }
 });
 app.addEventListener('focusin', e => {
+  if(e.target.id === 'f-client') showCombo();
   const card = e.target.closest('[data-card]');
   if(card && activeId !== card.dataset.card){ activeId = card.dataset.card; app.querySelectorAll('.ecard').forEach(c => c.classList.toggle('active', c.dataset.card === activeId)); }
 });
@@ -810,6 +856,11 @@ document.addEventListener('paste', e => {
 function autosize(t){ t.style.height = 'auto'; t.style.height = Math.max(140, t.scrollHeight + 2) + 'px'; }
 function autosizeAll(){ app.querySelectorAll('textarea').forEach(autosize); }
 
+document.addEventListener('mousedown', e => { if(!e.target.closest('.combo')) hideCombo(); });
+document.addEventListener('keydown', e => {
+  if(e.key !== 'Escape') return;
+  if(clientEdit){ clientEdit = null; render(true); } else if(pruneAsk){ pruneAsk = null; render(true); } else hideCombo();
+});
 window.addEventListener('beforeunload', e => { if(dirty){ e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- dados ---------- */
@@ -821,13 +872,14 @@ function errMsg(err){
   return 'Não foi possível salvar agora. Suas alterações continuam aqui; tente de novo.';
 }
 function summarize(row){
-  return { id: row.id, client: row.client, clientKey: row.client_key, slug: row.client_slug, period: row.period, createdAt: row.created_at, count: row.post_count, bytes: Number(row.media_bytes) || 0 };
+  return { id: row.id, clientId: row.client_id || null, client: row.client, clientKey: row.client_key, slug: row.client_slug, period: row.period, createdAt: row.created_at, count: row.post_count, bytes: Number(row.media_bytes) || 0 };
 }
-async function loadIndex(){
-  const { data, error } = await sb.from('plans').select('id, client, client_key, client_slug, period, created_at, post_count, media_bytes').order('created_at', { ascending:false });
+async function loadIndex(skipMigrate){
+  const { data, error } = await sb.from('plans').select('id, client, client_key, client_slug, client_id, period, created_at, post_count, media_bytes').order('created_at', { ascending:false });
   if(!error){ index = (data || []).map(summarize); }
   indexReady = true;
-  if(view === 'home' || view === 'list') render(true); else updatePruneHint();
+  if(view === 'home' || view === 'list' || view === 'clients') render(true); else updatePruneHint();
+  if(!skipMigrate) migrateClients();
 }
 async function authHeader(){
   const { data } = await sb.auth.getSession();
@@ -899,7 +951,9 @@ async function save(){
   cur.posts.forEach(p => { p.num = String(p.num || '').trim(); p.videoUrl = (p.videoUrl || '').trim(); });
   sortByDate();
   cur.client = cur.client.replace(/\s+/g, ' ').trim(); cur.period = cur.period.trim();
-  if(!cur.client){ toast('Preencha o nome do cliente antes de salvar.', true); document.getElementById('f-client')?.focus(); return; }
+  if(!cur.clientId){ const m = clientByKey(clientKey(cur.client)); if(m){ cur.clientId = m.id; cur.client = m.name; } }
+  if(!cur.clientId){ toast(cur.client ? 'Escolha o cliente na lista ou clique em “Cadastrar”.' : 'Escolha o cliente antes de salvar.', true); document.getElementById('f-client')?.focus(); showCombo(); return; }
+  const cli = clientById(cur.clientId); if(cli) cur.client = cli.name;
   const need = excessFor(cur);
   if(need && !pruneChoice){
     const options = clientSiblings(cur);
@@ -922,9 +976,9 @@ async function save(){
     }
     const media = mediaOf(cur);
     const body = structuredClone(cur);
-    delete body.id; delete body.client; delete body.period; delete body.createdAt;
+    delete body.id; delete body.client; delete body.period; delete body.createdAt; delete body.clientId; delete body.brandInfo;
     const row = {
-      id: cur.id, client: cur.client, client_key: clientKey(cur.client), client_slug: clientSlug(cur.client),
+      id: cur.id, client: cur.client, client_key: clientKey(cur.client), client_slug: cli?.slug || clientSlug(cur.client), client_id: cur.clientId,
       period: cur.period, created_at: cur.createdAt, updated_at: new Date().toISOString(),
       post_count: cur.posts.length, media_bytes: media.reduce((s,m) => s + (cur.sizes[m] || 0), 0), data: body
     };
@@ -997,6 +1051,219 @@ async function showClientPlan(fn, arg){
   cur = rowToPlan(data); view = 'client'; render(false);
 }
 
+/* ---------- clientes ---------- */
+let clients = [], clientsReady = false, migrating = false;
+let clientEdit = null;   // estado da janela de cadastro/edição de cliente
+const HEX_RE = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i;
+const normHex = h => { h = String(h || '').trim().replace(/^#/, ''); if(h.length === 3) h = h.split('').map(c => c + c).join(''); return '#' + h.toLowerCase(); };
+const clientById = id => clients.find(c => c.id === id) || null;
+const clientByKey = key => clients.find(c => c.name_key === key) || null;
+function inkOn(hex){
+  const n = parseInt(normHex(hex).slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const lin = v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); };
+  return (0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)) > 0.45 ? '#141413' : '#ffffff';
+}
+function brandVars(colors){
+  const c = (colors || []).filter(x => HEX_RE.test(x)).map(normHex);
+  if(!c.length) return '';
+  return `--brand:${c[0]};--brand2:${c[1] || c[0]};--brand-ink:${inkOn(c[0])};`;
+}
+// Logo e cores que valem para um planejamento (na página do cliente vêm junto do planejamento).
+function brandOf(P){
+  const info = P.brandInfo || clientById(P.clientId) || null;
+  return { logo: info?.logo || P.logo || null, colors: (info?.colors || []), name: info?.name || P.client };
+}
+function brandStyle(P){
+  if(P.useBrand === false) return '';
+  return brandVars(brandOf(P).colors);
+}
+function uniqueSlug(name, exceptId){
+  const base = clientSlug(name); let s = base, i = 2;
+  while(clients.some(c => c.slug === s && c.id !== exceptId)) s = `${base}-${i++}`;
+  return s;
+}
+async function loadClients(){
+  const { data, error } = await sb.from('clients').select('*').order('name');
+  if(!error) clients = data || [];
+  clientsReady = !error;
+  if(view === 'clients') render(true);
+}
+// Cadastra automaticamente os clientes dos planejamentos antigos (feitos antes do cadastro existir).
+async function migrateClients(){
+  if(migrating || !clientsReady || !indexReady) return;
+  const orphans = index.filter(r => !r.clientId && r.clientKey);
+  if(!orphans.length) return;
+  migrating = true;
+  try {
+    const groups = {};
+    orphans.forEach(r => (groups[r.clientKey] = groups[r.clientKey] || []).push(r));
+    for(const [key, rows] of Object.entries(groups)){
+      let c = clientByKey(key);
+      if(!c){
+        const latest = rows[0];
+        c = { id: 'c' + rand(21), name: latest.client, name_key: key, slug: uniqueSlug(latest.client), logo: null, colors: [] };
+        try {
+          const { data } = await sb.from('plans').select('data').eq('id', latest.id).maybeSingle();
+          const old = data?.data?.logo;
+          if(old){
+            const blob = await (await fetch(src(old))).blob();
+            const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+            const path = (MEDIA_BASE ? 'r2:' : '') + `${c.id}/${uid()}.${ext}`;
+            await uploadBlob(path, blob); c.logo = path;
+          }
+        } catch(e){}
+        const { error } = await sb.from('clients').insert(c);
+        if(error) continue;
+        clients.push(c);
+      }
+      await sb.from('plans').update({ client_id: c.id, client_slug: c.slug }).in('id', rows.map(r => r.id));
+    }
+    await loadClients();
+    await loadIndex(true);
+  } finally { migrating = false; }
+}
+function planCountOf(clientId){ return index.filter(r => r.clientId === clientId).length; }
+
+/* tela de clientes */
+function clientsPage(){
+  return `<section class="list"><div class="wrap">
+    <div class="backrow"><button class="backbtn" data-a="go-home">← Início</button></div>
+    <div class="list-head">
+      <div><p class="lbl">Cadastro</p><h1>${clientsReady ? `${clients.length} cliente${clients.length === 1 ? '' : 's'}` : 'Carregando…'}</h1></div>
+      <button class="abtn" data-a="client-new"><span class="plus">+</span>Novo cliente</button>
+    </div>
+    ${clients.length ? `<div class="cgrid">${clients.map(c => `<button class="ccard" data-a="client-edit" data-id="${esc(c.id)}">
+        <span class="ccard-logo">${c.logo ? `<img src="${esc(src(c.logo))}" alt="">` : `<b>${esc((c.name || '?').slice(0,1).toUpperCase())}</b>`}</span>
+        <span class="ccard-txt"><b>${esc(c.name)}</b><small>${planCountOf(c.id)} planejamento${planCountOf(c.id) === 1 ? '' : 's'} · /${esc(c.slug)}</small></span>
+        <span class="sw">${(c.colors || []).map(x => `<i style="background:${esc(normHex(x))}"></i>`).join('')}</span>
+      </button>`).join('')}</div>`
+      : `<div class="empty-list"><span>${clientsReady ? 'Nenhum cliente cadastrado ainda.' : 'Carregando…'}</span></div>`}
+  </div></section>`;
+}
+
+/* janela de cadastro */
+function openClientModal(c, opts = {}){
+  clientEdit = {
+    id: c?.id || null, name: c?.name || opts.name || '', logo: c?.logo || null, logoPending: null, logoUrl: null,
+    colors: [...(c?.colors || [])].map(normHex), slug: c?.slug || '', fromPlan: !!opts.fromPlan, delArm: false, saving: false
+  };
+  render(true);
+  requestAnimationFrame(() => document.getElementById('c-name')?.focus());
+}
+const COLOR_ROLES = ['Detalhes, etiquetas e botões', 'Fundo do cabeçalho', 'Referência', 'Referência', 'Referência'];
+function clientModal(){
+  const e = clientEdit;
+  const n = e.id ? planCountOf(e.id) : 0;
+  const slug = e.id ? e.slug : (e.name ? uniqueSlug(e.name) : '');
+  return `<div class="modal-bg" data-a="cm-bg"><div class="modal cmodal" role="dialog" aria-modal="true" aria-labelledby="cm-t">
+    <div class="mhead"><div><p class="lbl">${e.id ? 'Editar cliente' : 'Novo cliente'}</p><h3 id="cm-t">${esc(e.name || 'Cliente')}</h3></div><button class="ibtn" data-a="cm-close" aria-label="Fechar">✕</button></div>
+    <div class="cm-grid">
+      <div class="cm-form">
+        <div class="fld"><label class="lbl" for="c-name">Nome</label><input class="inp" id="c-name" value="${esc(e.name)}" autocomplete="off"></div>
+        <div class="fld"><span class="lbl">Logo ou ícone</span>
+          <div class="cm-logo-row">
+            <label class="drop cm-logo">${e.logoUrl || e.logo ? `<img src="${esc(e.logoUrl || src(e.logo))}" alt="">` : '<span>Arraste ou <strong>escolha</strong></span>'}<input type="file" accept="image/*" data-up="clogo" id="up-clogo"></label>
+            ${e.logoUrl || e.logo ? `<button class="lnk danger" data-a="cm-rmlogo">Remover</button>` : '<span class="hint">PNG com fundo transparente fica melhor.</span>'}
+          </div>
+        </div>
+        <div class="fld"><span class="lbl">Cores (até 5)</span>
+          <div class="crows" id="crows">${e.colors.map((x,i) => colorRow(x,i)).join('')}</div>
+          ${e.colors.length < 5 ? `<button class="sbtn" data-a="cm-addcolor" style="align-self:flex-start">+ Adicionar cor</button>` : ''}
+          <p class="hint">Clique no quadrado para escolher na roda de cores, ou digite o código (ex.: #1E5BB8).</p>
+        </div>
+        ${slug ? `<p class="hint">Link fixo: <code>${esc(location.host)}/${esc(slug)}</code>${e.id ? '' : ' (criado ao salvar)'}</p>` : ''}
+      </div>
+      <div class="cm-prev"><span class="lbl">Como o cliente vai ver</span><div id="bp">${brandPreview()}</div></div>
+    </div>
+    <div class="mfoot">
+      ${e.id ? (n ? `<span class="hint">Tem ${n} planejamento${n === 1 ? '' : 's'}; para excluir o cliente, apague os planejamentos antes.</span>` : `<button class="sbtn" data-a="cm-delete">${e.delArm ? 'Confirmar exclusão' : 'Excluir cliente'}</button>`) : ''}
+      <span style="flex:1"></span>
+      <button class="sbtn" data-a="cm-close">Cancelar</button>
+      <button class="sbtn dark" data-a="cm-save" ${e.saving ? 'disabled' : ''}>${e.saving ? 'Salvando…' : 'Salvar cliente'}</button>
+    </div>
+  </div></div>`;
+}
+function colorRow(x, i){
+  return `<div class="crow">
+    <input type="color" class="cpick" data-ci="${i}" value="${esc(normHex(x))}" aria-label="Escolher cor ${i + 1}">
+    <input class="inp chex" data-ch="${i}" value="${esc(normHex(x).toUpperCase())}" maxlength="7" aria-label="Código da cor ${i + 1}">
+    <span class="crole"><b>Cor ${i + 1}</b>${COLOR_ROLES[i]}</span>
+    <button class="ibtn" data-a="cm-rmcolor" data-i="${i}" aria-label="Remover cor ${i + 1}">✕</button>
+  </div>`;
+}
+function brandPreview(){
+  const e = clientEdit;
+  const vars = brandVars(e.colors);
+  const logo = e.logoUrl || (e.logo ? src(e.logo) : '');
+  return `<div class="bp ${vars ? 'branded' : ''}" style="${vars}">
+    <div class="bp-hero"><span class="bp-logo">${logo ? `<img src="${esc(logo)}" alt="">` : ''}</span><span><small>PLANEJAMENTO DE CONTEÚDO</small><b>${esc(e.name || 'Nome do cliente')}</b><em>${esc(MONTHS[new Date().getMonth()])}</em></span></div>
+    <div class="bp-body">
+      <div class="bp-meta"><span class="bp-num">Nº 01</span><span class="chip reels"><i></i>Reels</span></div>
+      <div class="bp-card"><div class="bp-img"></div><div class="bp-lines"><i></i><i></i><i style="width:60%"></i></div></div>
+      <div class="bp-watch"><span class="play"></span>Assistir vídeo</div>
+    </div>
+    <div class="bp-legend">${e.colors.length ? e.colors.map((x,i) => `<span><i style="background:${esc(normHex(x))}"></i>${i < 2 ? COLOR_ROLES[i] : 'Guardada para referência'}</span>`).join('') : '<span>Sem cores: a página usa o padrão Elev.</span>'}</div>
+  </div>`;
+}
+function refreshPreview(){ const el = document.getElementById('bp'); if(el) el.innerHTML = brandPreview(); }
+async function saveClient(){
+  const e = clientEdit; if(!e || e.saving) return;
+  e.name = (document.getElementById('c-name')?.value || e.name).replace(/\s+/g, ' ').trim();
+  if(!e.name){ toast('Preencha o nome do cliente.', true); return; }
+  const key = clientKey(e.name);
+  const dup = clients.find(c => c.name_key === key && c.id !== e.id);
+  if(dup){ toast(`Já existe um cliente chamado ${dup.name}.`, true); return; }
+  e.saving = true; render(true);
+  try {
+    const id = e.id || ('c' + rand(21));
+    const old = e.id ? clientById(e.id) : null;
+    let logo = e.logo;
+    if(e.logoPending){
+      const path = (MEDIA_BASE ? 'r2:' : '') + `${id}/${uid()}.${e.logoPending.ext}`;
+      await uploadBlob(path, e.logoPending.blob); logo = path;
+    }
+    const row = { id, name: e.name, name_key: key, slug: e.id ? e.slug : uniqueSlug(e.name), logo, colors: e.colors.filter(x => HEX_RE.test(x)).map(normHex), updated_at: new Date().toISOString() };
+    const { error } = await sb.from('clients').upsert(row);
+    if(error) throw error;
+    if(old?.logo && old.logo !== logo) removeFiles([old.logo]).catch(() => {});
+    if(old && old.name !== row.name) await sb.from('plans').update({ client: row.name, client_key: key }).eq('client_id', id);
+    await loadClients();
+    if(e.fromPlan && cur){ cur.clientId = id; cur.client = row.name; markDirty(); }
+    clientEdit = null;
+    if(old && old.name !== row.name) await loadIndex();
+    toast(`Cliente ${row.name} salvo.`);
+    render(true);
+  } catch(err){
+    e.saving = false; render(true);
+    toast(/duplicate|unique/i.test(err?.message || '') ? 'Já existe um cliente com esse nome ou link.' : errMsg(err), true);
+  }
+}
+async function deleteClient(){
+  const e = clientEdit; if(!e?.id || planCountOf(e.id)) return;
+  try {
+    const { error } = await sb.from('clients').delete().eq('id', e.id);
+    if(error) throw error;
+    await removePlanFolder(e.id).catch(() => {});
+    clientEdit = null; await loadClients(); toast('Cliente excluído.'); render(true);
+  } catch(err){ toast(errMsg(err), true); }
+}
+
+/* seletor de cliente no planejamento */
+function comboItems(q){
+  const k = clientKey(q);
+  const list = clients.filter(c => !k || c.name_key.includes(k)).slice(0, 8);
+  const exact = clients.some(c => c.name_key === k);
+  return list.map(c => `<button class="combo-opt" data-a="pick-client" data-id="${esc(c.id)}"><span class="ccard-logo sm">${c.logo ? `<img src="${esc(src(c.logo))}" alt="">` : `<b>${esc(c.name.slice(0,1).toUpperCase())}</b>`}</span>${esc(c.name)}<span class="sw">${(c.colors || []).slice(0,5).map(x => `<i style="background:${esc(normHex(x))}"></i>`).join('')}</span></button>`).join('')
+    + (q.trim() && !exact ? `<button class="combo-opt add" data-a="new-client-from">+ Cadastrar “${esc(q.trim())}”</button>` : '')
+    + (!list.length && !q.trim() ? `<div class="combo-empty">Nenhum cliente cadastrado. Digite o nome para cadastrar.</div>` : '');
+}
+function showCombo(){
+  const box = document.getElementById('combo-list'), inp = document.getElementById('f-client');
+  if(!box || !inp) return;
+  box.innerHTML = comboItems(inp.value); box.hidden = false;
+}
+function hideCombo(){ const box = document.getElementById('combo-list'); if(box) box.hidden = true; }
+
 /* ---------- rotas ---------- */
 async function route(){
   const parts = location.pathname.replace(/\/+$/, '').split('/').filter(Boolean).map(decodeURIComponent);
@@ -1004,9 +1271,11 @@ async function route(){
   if(parts.length === 1 && !RESERVED.has(parts[0])) return showClientPlan('get_latest_plan', parts[0].toLowerCase());
   if(!session){ view = 'login'; loginErr = ''; render(false); requestAnimationFrame(() => document.getElementById('l-email')?.focus()); return; }
   if(!indexReady) loadIndex();
+  if(!clientsReady) loadClients().then(() => migrateClients());
   if(parts[0] === 'novo') return startNew();
   if(parts[0] === 'editar' && parts[1]) return openPlan(parts[1], true);
   if(parts[0] === 'planejamentos'){ view = 'list'; return render(false); }
+  if(parts[0] === 'clientes'){ view = 'clients'; return render(false); }
   setPath('/', true); view = 'home'; render(false);
 }
 async function boot(){
@@ -1020,7 +1289,7 @@ async function boot(){
   sb.auth.onAuthStateChange((event, s) => {
     const was = !!session; session = s;
     if(event === 'SIGNED_IN' && !was){ indexReady = false; route(); }
-    if(event === 'SIGNED_OUT'){ index = []; indexReady = false; resetWork(); cur = null; setPath('/', true); route(); }
+    if(event === 'SIGNED_OUT'){ index = []; indexReady = false; clients = []; clientsReady = false; resetWork(); cur = null; setPath('/', true); route(); }
   });
   route();
 }
