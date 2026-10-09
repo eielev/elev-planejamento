@@ -41,7 +41,7 @@ export default {
       if (request.method === 'POST' && url.pathname === '/trello/cards') {
         await requireTeam(request, env);
         const { cards = [] } = await request.json();
-        return json(await trelloSync(env, cards.slice(0, 100)), 200, cors);
+        return json(await trelloSync(env, cards.slice(0, 20)), 200, cors);
       }
       if (url.pathname === '/trello/check') {
         if (!env.TRELLO_KEY || !env.TRELLO_TOKEN) return json({ keys: 'faltando' }, 200, cors);
@@ -160,24 +160,19 @@ async function trelloList(env) {
 }
 async function trelloSync(env, cards) {
   if (!env.TRELLO_KEY || !env.TRELLO_TOKEN) return { error: 'chaves do Trello não configuradas no Worker' };
+  // O plano gratuito da Cloudflare limita cada chamada a 50 pedidos externos: o painel manda em lotes pequenos.
   const list = await trelloList(env);
+  const open = new Set((await trello(env, 'GET', `/boards/${env.TRELLO_BOARD}/cards`, { fields: 'id' })).map(c => c.id));
   const results = [];
-  // Cards novos entram no topo da lista; percorre de trás para frente para o 01 ficar em primeiro.
+  // Cards novos entram no topo da lista; percorre de trás para frente para o menor número ficar em primeiro.
   for (const c of [...cards].reverse()) {
     const fields = { name: String(c.name || '').slice(0, 300), desc: String(c.desc || '').slice(0, 15000), due: c.due || null };
     try {
-      let card = null;
-      if (c.cardId) {
-        try { card = await trello(env, 'PUT', `/cards/${c.cardId}`, fields); }
-        catch (e) { if (e.status !== 404 && e.status !== 400) throw e; }
-      }
-      if (!card) {
-        card = await trello(env, 'POST', '/cards', { ...fields, idList: list.id, pos: 'top' });
-        if (c.coverUrl && /^https:\/\//.test(c.coverUrl)) {
-          try { await trello(env, 'POST', `/cards/${card.id}/attachments`, { url: c.coverUrl, name: 'arte' }); } catch (e) {}
-        }
-      }
-      results.push({ postId: c.postId, ok: true, cardId: card.id, url: card.shortUrl || card.url });
+      const exists = !!(c.cardId && open.has(c.cardId));
+      const card = exists
+        ? await trello(env, 'PUT', `/cards/${c.cardId}`, fields)
+        : await trello(env, 'POST', '/cards', { ...fields, idList: list.id, pos: 'top' });
+      results.push({ postId: c.postId, ok: true, created: !exists, cardId: card.id, url: card.shortUrl || card.url });
     } catch (e) {
       results.push({ postId: c.postId, ok: false, error: String(e.message).slice(0, 200) });
     }

@@ -1057,7 +1057,13 @@ async function showClientPlan(fn, arg){
 }
 
 /* ---------- Trello ---------- */
-let trelloArm = false, trelloBusy = false;
+let trelloArm = false, trelloBusy = false, trelloProgress = null;
+function paintTrelloProgress(){
+  const el = document.getElementById('trello-prog'); if(!el || !trelloProgress) return;
+  const { done, total } = trelloProgress;
+  el.querySelector('i').style.width = Math.round(done / total * 100) + '%';
+  el.querySelector('span').textContent = `Enviando para o Trello… ${done} de ${total}`;
+}
 function trelloCardsOf(P){ return P.trello?.cards || {}; }
 function trelloBox(P){
   const cards = trelloCardsOf(P);
@@ -1065,7 +1071,7 @@ function trelloBox(P){
   const approved = P.trello?.approvedAt;
   const n = P.posts.length;
   let action;
-  if(trelloBusy) action = `<button class="sbtn dark" disabled>Enviando para o Trello…</button>`;
+  if(trelloBusy) action = `<div class="tprog" id="trello-prog"><span>Enviando para o Trello… ${trelloProgress?.done || 0} de ${trelloProgress?.total || n}</span><div class="bar"><i style="width:${trelloProgress ? Math.round(trelloProgress.done / trelloProgress.total * 100) : 0}%"></i></div></div>`;
   else if(trelloArm) action = `<button class="sbtn dark" data-a="trello-go">${approved ? `Atualizar ${n} card${n === 1 ? '' : 's'}` : `Criar ${n} card${n === 1 ? '' : 's'} em PUBLICAR/AGENDAR`}</button><button class="lnk" data-a="trello-cancel">Cancelar</button>`;
   else action = `<button class="sbtn ${approved ? '' : 'dark'}" data-a="trello-arm" ${n ? '' : 'disabled'}>${approved ? 'Atualizar cards no Trello' : 'Cliente aprovou → criar cards no Trello'}</button>`;
   return `<div class="trello-box">
@@ -1096,17 +1102,30 @@ async function sendToTrello(){
       name: trelloCardName(cur, p), desc: trelloDesc(cur, p),
       due: p.date ? `${p.date}T15:00:00.000Z` : null
     }));
-    const res = await mediaApi('/trello/cards', { cards });
-    if(res.error) throw new Error(res.error);
+    // Lotes de 5; do último para o primeiro, para os cards novos ficarem no topo na ordem certa.
+    const batches = [];
+    for(let i = 0; i < cards.length; i += 5) batches.push(cards.slice(i, i + 5));
     const map = Object.assign({}, known);
-    let ok = 0; const fails = [];
-    for(const r of res.results || []){ if(r.ok){ map[r.postId] = { id: r.cardId, url: r.url }; ok++; } else fails.push(r.error); }
+    let ok = 0, created = 0, listName = 'PUBLICAR/AGENDAR', stopErr = null; const fails = [];
+    trelloProgress = { done: 0, total: cards.length }; render(true);
+    for(const b of batches.reverse()){
+      try {
+        const res = await mediaApi('/trello/cards', { cards: b });
+        if(res.error) throw new Error(res.error);
+        listName = res.list || listName;
+        for(const r of res.results || []){ if(r.ok){ map[r.postId] = { id: r.cardId, url: r.url }; ok++; if(r.created) created++; } else fails.push(r.error); }
+      } catch(e){ stopErr = e; break; }
+      trelloProgress.done += b.length; paintTrelloProgress();
+    }
+    trelloProgress = null;
+    const res = { list: listName };
     const first = !cur.trello?.approvedAt;
     cur.trello = { approvedAt: cur.trello?.approvedAt || new Date().toISOString(), cards: map };
     dirty = true; trelloBusy = false;
     await save();
-    if(fails.length) toast(`${ok} card${ok === 1 ? '' : 's'} ok, ${fails.length} com erro. Detalhe: ${fails[0]}`, true, 12000);
-    else toast(first ? `${ok} card${ok === 1 ? '' : 's'} criado${ok === 1 ? '' : 's'} em ${res.list}.` : `${ok} card${ok === 1 ? '' : 's'} atualizado${ok === 1 ? '' : 's'} no Trello.`, false, 5000);
+    if(stopErr) toast(`${ok} card${ok === 1 ? '' : 's'} enviado${ok === 1 ? '' : 's'}, mas o envio parou. Clique em Atualizar para continuar. Detalhe: ${String(stopErr.message || stopErr).slice(0, 140)}`, true, 12000);
+    else if(fails.length) toast(`${ok} card${ok === 1 ? '' : 's'} ok, ${fails.length} com erro. Detalhe: ${fails[0]}`, true, 12000);
+    else { const upd = ok - created; toast(`Pronto no Trello (${res.list}): ${[created ? `${created} criado${created === 1 ? '' : 's'}` : '', upd ? `${upd} atualizado${upd === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ')}.`, false, 6000); }
   } catch(err){
     trelloBusy = false; render(true);
     toast('Não foi possível falar com o Trello. Detalhe: ' + String(err?.message || err).slice(0, 160), true, 12000);

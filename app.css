@@ -383,3 +383,7 @@ img{max-width:100%}
 .trello-txt{display:flex; flex-direction:column; gap:2px; min-width:0; flex:1 1 280px; font-size:13.5px}
 .trello-txt span{color:var(--muted)}
 .trello-act{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+
+.tprog{display:flex; flex-direction:column; gap:6px; min-width:240px; font-size:13px}
+.tprog .bar{height:6px; border-radius:6px; background:var(--surface); border:1px solid var(--line); overflow:hidden}
+.tprog .bar i{display:block; height:100%; background:var(--ink); transition:width .3s}
