@@ -18,6 +18,7 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/sign') {
         await requireTeam(request, env);
+        if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY) return json({ error: 'chaves do R2 não configuradas no Worker' }, 500, cors);
         const { key } = await request.json();
         if (!KEY_RE.test(key || '')) return json({ error: 'chave inválida' }, 400, cors);
         return json({ url: await presignPut(env, key, 3600) }, 200, cors);

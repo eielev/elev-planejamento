@@ -889,7 +889,7 @@ async function authHeader(){
 async function mediaApi(path, body){
   const r = await fetch(MEDIA_BASE + path, { method:'POST', headers:{ 'content-type':'application/json', authorization: await authHeader() }, body: JSON.stringify(body) });
   if(r.status === 401) throw new Error('auth: sessão expirada');
-  if(!r.ok) throw new Error('falha ao falar com o servidor de arquivos (' + r.status + ')');
+  if(!r.ok){ let m = ''; try { m = (await r.json()).error || ''; } catch(e){} throw new Error('servidor de arquivos respondeu ' + r.status + (m ? ': ' + m : '')); }
   return r.json();
 }
 function putWithProgress(url, blob, onProgress){

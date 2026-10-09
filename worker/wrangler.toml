@@ -1,6 +1,8 @@
 name = "elev-midia"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
+# Mantém as variáveis/segredos definidos no painel da Cloudflare a cada deploy
+keep_vars = true
 
 [[r2_buckets]]
 binding = "MEDIA"
