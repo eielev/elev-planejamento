@@ -390,7 +390,7 @@ function editPage(){
   const latest = !isNew && isLatestOfClient({ id:P.id, clientKey:clientKey(P.client), createdAt:P.createdAt });
   const cf = (text, label) => `<div class="copyfield"><code>${esc(text)}</code><button class="cbtn" data-a="copytext" data-text="${esc(text)}" aria-label="Copiar ${label}" title="Copiar">${COPY_ICON}</button></div>`;
   const setup = `<section><div class="wrap"><div class="setup">
-    <div class="fld"><label class="lbl" for="f-client">Cliente</label><input class="inp big" id="f-client" data-g="client" value="${esc(P.client)}" placeholder="Ex.: Berlanga Acupuntura" autocomplete="off"></div>
+    <div class="fld"><label class="lbl" for="f-client">Cliente</label><input class="inp big" id="f-client" data-g="client" value="${esc(P.client)}" autocomplete="off"></div>
     <div class="fld"><label class="lbl" for="f-period">Mês ou período</label><input class="inp big" id="f-period" data-g="period" value="${esc(P.period)}" placeholder="Ex.: Outubro / Novembro" autocomplete="off"></div>
     <div class="fld"><span class="lbl">Logo (opcional)</span>
       <label class="drop logo-drop" data-up="logo">${P.logo ? `<img src="${esc(src(P.logo))}" alt="Logo do cliente">` : '<span>Arraste ou <strong>escolha</strong></span>'}<input type="file" accept="image/*" data-up="logo" id="up-logo"></label>
