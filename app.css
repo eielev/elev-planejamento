@@ -296,3 +296,13 @@ img{max-width:100%}
 .links .copyfield{margin-top:0; background:var(--card)}
 
 .ecard.moved{border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent)}
+
+.vid.main{background:var(--card); border-color:var(--line-strong)}
+.video-drop{min-height:150px; padding:16px}
+.video-drop span{display:flex; flex-direction:column; gap:4px; align-items:center}
+.video-drop strong{font-size:15px}
+.cover-drop.single.tall{max-width:180px}
+.prow.pick{cursor:pointer; grid-template-columns:auto minmax(0,1fr) minmax(0,1fr) auto}
+.prow.pick input{width:18px; height:18px; accent-color:var(--danger)}
+.prow.pick.on{background:var(--danger-bg)}
+.sbtn:disabled{opacity:.45; cursor:default}

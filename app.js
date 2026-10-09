@@ -16,7 +16,7 @@ const MEDIA_BASE = (cfg.MEDIA_BASE || '').replace(/\/+$/, '');   // Cloudflare R
 const MAX_VIDEO = MEDIA_BASE ? 2 * 1024 * 1024 * 1024 : 50 * 1024 * 1024;
 const MAX_VIDEO_LABEL = MEDIA_BASE ? '2 GB' : '50 MB';
 const CAP_BYTES = (cfg.STORAGE_GB || (MEDIA_BASE ? 10 : 1)) * 1024 * 1024 * 1024;
-const KEEP_PER_CLIENT = 2;
+const KEEP_PER_CLIENT = 3;
 const RESERVED = new Set(['p', 'editar', 'novo', 'planejamentos', 'login', 'sair', 'api', 'assets']);
 
 /* ---------- estado ---------- */
@@ -70,7 +70,11 @@ function fmtCreated(iso){
 function firstLine(t){ return (t || '').split('\n').map(s => s.trim()).find(Boolean) || ''; }
 function richCaption(t){ return esc(t).replace(/(^|\s)(#[\p{L}\p{N}_]+)/gu, '$1<span class="tag">$2</span>'); }
 function getPost(id){ return cur?.posts.find(p => p.id === id); }
-function normPost(x){ return Object.assign({ id:uid(), num:'', date:'', type:'post', images:[], caption:'', script:'', cover:null, video:null, videoUrl:'', videoMode:'link' }, x); }
+function normPost(x){
+  if(x && x.videoMode === 'link' && !x.videoUrl && !x.video) x = Object.assign({}, x, { videoMode:'file' });
+  return normPost0(x);
+}
+function normPost0(x){ return Object.assign({ id:uid(), num:'', date:'', type:'post', images:[], caption:'', script:'', cover:null, video:null, videoUrl:'', videoMode:'file' }, x); }
 function normalize(d){
   const p = Object.assign({ id:newPlanId(), createdAt:new Date().toISOString(), client:'', period:'', logo:null, posts:[], sizes:{} }, d || {});
   p.posts = (p.posts || []).map(normPost);
@@ -129,19 +133,39 @@ async function copyText(text, btn){
   }
 }
 
-/* ---------- regra dos 2 últimos por cliente ---------- */
-function toPrune(plan){
+/* ---------- limite de planejamentos por cliente ---------- */
+// Outros planejamentos do mesmo cliente, mais recentes primeiro, e quantos precisam sair para caber no limite.
+function clientSiblings(plan){
   const key = clientKey(plan.client);
   if(!key) return [];
-  const others = index.filter(r => r.id !== plan.id && r.clientKey === key);
-  const all = [...others, { id:plan.id, createdAt:plan.createdAt }].sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  return all.slice(KEEP_PER_CLIENT).filter(r => r.id !== plan.id).map(r => index.find(x => x.id === r.id)).filter(Boolean);
+  return index.filter(r => r.id !== plan.id && r.clientKey === key).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 }
+function excessFor(plan){ return Math.max(0, clientSiblings(plan).length + 1 - KEEP_PER_CLIENT); }
 function pruneHintHtml(){
   if(!cur) return '';
-  const list = toPrune(cur);
-  if(!list.length) return '';
-  return `Ao salvar, ${list.length > 1 ? 'os planejamentos' : 'o planejamento'} mais antigo${list.length > 1 ? 's' : ''} deste cliente (${list.map(r => esc(r.period || fmtCreated(r.createdAt))).join(', ')}) ${list.length > 1 ? 'serão apagados' : 'será apagado'}. Ficam só os 2 últimos.`;
+  const n = excessFor(cur);
+  if(!n) return '';
+  return `Este cliente já tem ${clientSiblings(cur).length} planejamentos salvos (o limite é ${KEEP_PER_CLIENT}). Ao salvar, você vai escolher ${n > 1 ? `quais ${n} apagar` : 'qual apagar'}.`;
+}
+let pruneAsk = null;      // { need, options, selected:Set } enquanto a janela de escolha está aberta
+let pruneChoice = null;   // ids escolhidos para apagar no próximo salvamento
+function pruneModal(){
+  const { need, options, selected } = pruneAsk;
+  const ok = selected.size >= need;
+  return `<div class="modal-bg" data-a="prune-bg"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="pm-t">
+    <div class="mhead"><div><p class="lbl">${esc(cur.client)}</p><h3 id="pm-t">${need > 1 ? `Escolha ${need} planejamentos para apagar` : 'Escolha qual planejamento apagar'}</h3></div><button class="ibtn" data-a="prune-cancel" aria-label="Fechar">✕</button></div>
+    <p class="hint" style="margin:0">Cada cliente guarda até ${KEEP_PER_CLIENT} planejamentos. Para salvar este, ${need > 1 ? `${need} dos anteriores precisam` : 'um dos anteriores precisa'} sair. O que for apagado some junto com as imagens e vídeos dele.</p>
+    <div class="rows">${options.map(r => `<label class="prow pick ${selected.has(r.id) ? 'on' : ''}">
+        <input type="checkbox" data-a="prune-pick" value="${esc(r.id)}" ${selected.has(r.id) ? 'checked' : ''}>
+        <span class="cl">${esc(r.period || 'Sem período')}</span>
+        <span class="pe">${r.count || 0} conteúdo${r.count === 1 ? '' : 's'}</span>
+        <span class="cr">criado em ${esc(fmtCreated(r.createdAt))}</span>
+      </label>`).join('')}</div>
+    <div class="mfoot" style="justify-content:flex-end">
+      <button class="sbtn" data-a="prune-cancel">Cancelar</button>
+      <button class="sbtn dark" data-a="prune-confirm" ${ok ? '' : 'disabled'}>${selected.size > 1 ? `Apagar ${selected.size} e salvar` : 'Apagar e salvar'}</button>
+    </div>
+  </div></div>`;
 }
 function updatePruneHint(){ const el = document.getElementById('prune'); if(el){ const h = pruneHintHtml(); el.innerHTML = h; el.hidden = !h; } }
 
@@ -168,6 +192,7 @@ function render(keepScroll){
   else if(view === 'home') html = topBar(true) + homePage() + footer(null);
   else if(view === 'list') html = topBar(true) + listPage() + footer(null);
   else if(view === 'edit') html = editBar() + topBar(false) + (preview ? planView(cur) : editPage()) + footer(cur);
+  if(view === 'edit' && pruneAsk) html += pruneModal();
   app.innerHTML = html;
   wireCarousels();
   autosizeAll();
@@ -279,7 +304,7 @@ function listPage(){
       <label class="sbtn" style="position:relative; overflow:hidden">Importar planejamento<input type="file" accept="application/json,.json" data-up="import" id="up-import" style="position:absolute; inset:0; opacity:0; cursor:pointer"></label>
       <span class="hint">Para trazer um arquivo de planejamento exportado (.json).</span>
     </div>
-    <p class="hint" style="margin-top:14px">Cada cliente mantém os 2 planejamentos mais recentes. Ao salvar o terceiro, o mais antigo é apagado. O “Copiar link” do mais recente copia o link fixo do cliente.</p>
+    <p class="hint" style="margin-top:14px">Cada cliente guarda até 3 planejamentos. Ao salvar o quarto, o painel pergunta qual apagar. O “Copiar link” do mais recente copia o link fixo do cliente.</p>
   </div></section>`;
 }
 
@@ -505,22 +530,22 @@ function emedia(p){
       <p class="hint">Uma imagem por tela, na ordem em que vão ao ar. Pode selecionar várias de uma vez.</p>
       ${vidBlock(p)}`;
   }
-  return `<span class="lbl">Capa</span>
-    <label class="drop single tall" data-up="cover" data-id="${id}">${p.cover ? `<img src="${esc(src(p.cover))}" alt="">` : '<span>Arraste a capa aqui<br>ou <strong>escolha</strong></span>'}<input type="file" accept="image/*" data-up="cover" data-id="${id}" id="up-cover-${id}"></label>
-    ${p.cover ? `<div class="mini-actions"><button class="lnk danger" data-a="rm-cover">Remover capa</button></div>` : ''}
-    ${vidBlock(p)}`;
+  return `${vidBlock(p)}
+    <span class="lbl" style="margin-top:6px">Capa</span>
+    <label class="drop single tall cover-drop" data-up="cover" data-id="${id}">${p.cover ? `<img src="${esc(src(p.cover))}" alt="">` : '<span>Arraste a capa aqui<br>ou <strong>escolha</strong></span>'}<input type="file" accept="image/*" data-up="cover" data-id="${id}" id="up-cover-${id}"></label>
+    ${p.cover ? `<div class="mini-actions"><button class="lnk danger" data-a="rm-cover">Remover capa</button></div>` : ''}`;
 }
 function vidBlock(p){
-  const id = p.id, vm = p.videoMode || 'link', story = p.type === 'story';
-  return `<div class="vid">
+  const id = p.id, vm = p.videoMode || 'file', story = p.type === 'story';
+  return `<div class="vid ${story ? '' : 'main'}">
       <span class="lbl">Vídeo${story ? ' (opcional)' : ''}</span>
-      <div class="seg" role="group" aria-label="Origem do vídeo"><button class="${vm==='link'?'on':''}" data-a="vmode" data-m="link">Link do Drive</button><button class="${vm==='file'?'on':''}" data-a="vmode" data-m="file">Arquivo até ${MAX_VIDEO_LABEL}</button></div>
+      <div class="seg" role="group" aria-label="Origem do vídeo"><button class="${vm==='file'?'on':''}" data-a="vmode" data-m="file">Arquivo até ${MAX_VIDEO_LABEL}</button><button class="${vm==='link'?'on':''}" data-a="vmode" data-m="link">Link do Drive</button></div>
       ${vm === 'link'
         ? `<input class="inp" id="vurl-${id}" data-f="videoUrl" value="${esc(p.videoUrl)}" placeholder="https://drive.google.com/file/d/…" inputmode="url" autocomplete="off">
            <p class="hint" id="vhint-${id}">${linkHint(p.videoUrl)}</p>`
         : (p.video
-            ? `<div class="vid-file"><span>Vídeo enviado</span><button class="lnk danger" data-a="rm-video">Remover vídeo</button></div>`
-            : `<label class="drop" data-up="video" data-id="${id}" style="padding:12px"><span>Escolha um vídeo MP4 de até ${MAX_VIDEO_LABEL}</span><input type="file" accept="video/mp4,video/webm,video/quicktime" data-up="video" data-id="${id}" id="up-video-${id}"></label>`)}
+            ? `<div class="vid-file"><span>✓ Vídeo ${pending.has(p.video) ? 'pronto para enviar ao salvar' : 'enviado'}</span><button class="lnk danger" data-a="rm-video">Remover vídeo</button></div>`
+            : `<label class="drop video-drop" data-up="video" data-id="${id}"><span><strong>Arraste o vídeo aqui</strong>ou escolha um MP4 de até ${MAX_VIDEO_LABEL}</span><input type="file" accept="video/mp4,video/webm,video/quicktime" data-up="video" data-id="${id}" id="up-video-${id}"></label>`)}
       ${!story && !p.video && !p.videoUrl ? `<p class="hint">Sem vídeo, o conteúdo aparece como <strong>Para gravar</strong>, com a capa e o roteiro.</p>` : ''}
       ${story ? `<p class="hint">Para stories em vídeo. O vídeo enviado aparece como a primeira tela; o link do Drive vira um botão abaixo das telas.</p>` : ''}
     </div>`;
@@ -678,6 +703,16 @@ app.addEventListener('click', e => {
     case 'open': openPlan(planId); break;
     case 'copy': { const r = index.find(x => x.id === planId); if(r) copyText(bestLink(r)); break; }
     case 'copytext': copyText(t.dataset.text, t); break;
+    case 'prune-pick': {
+      if(t.checked) pruneAsk.selected.add(t.value); else pruneAsk.selected.delete(t.value);
+      render(true); break;
+    }
+    case 'prune-cancel': pruneAsk = null; pruneChoice = null; render(true); break;
+    case 'prune-bg': if(e.target === t){ pruneAsk = null; render(true); } break;
+    case 'prune-confirm': {
+      if(!pruneAsk || pruneAsk.selected.size < pruneAsk.need) break;
+      pruneChoice = [...pruneAsk.selected]; pruneAsk = null; render(true); save(); break;
+    }
     case 'del-plan': {
       if(delPlanArm === planId){ delPlanArm = null; deletePlan(planId); }
       else {
@@ -865,9 +900,17 @@ async function save(){
   sortByDate();
   cur.client = cur.client.replace(/\s+/g, ' ').trim(); cur.period = cur.period.trim();
   if(!cur.client){ toast('Preencha o nome do cliente antes de salvar.', true); document.getElementById('f-client')?.focus(); return; }
+  const need = excessFor(cur);
+  if(need && !pruneChoice){
+    const options = clientSiblings(cur);
+    pruneAsk = { need, options, selected: new Set(options.slice(-need).map(r => r.id)) };
+    render(true);
+    return;
+  }
   saving = true; paintStatus();
   try {
-    const prune = toPrune(cur);
+    const prune = need ? (pruneChoice || []).map(id => index.find(r => r.id === id)).filter(Boolean) : [];
+    pruneChoice = null;
     const uploads = [...pending.entries()];
     let done = 0;
     for(const [path, blob] of uploads){
@@ -896,7 +939,7 @@ async function save(){
     dirty = false; isNew = false;
     if(wasNew) setPath(`/editar/${cur.id}`, true);
     await loadIndex();
-    toast(prune.length ? `Salvo. O planejamento mais antigo de ${cur.client} (${prune.map(r => r.period || fmtCreated(r.createdAt)).join(', ')}) foi apagado.` : 'Salvo. Os links do cliente já mostram esta versão.', false, prune.length ? 6000 : 3000);
+    toast(prune.length ? `Salvo. ${prune.length > 1 ? 'Apagados' : 'Apagado'}: ${prune.map(r => r.period || fmtCreated(r.createdAt)).join(', ')}.` : 'Salvo. Os links do cliente já mostram esta versão.', false, prune.length ? 6000 : 3000);
     saving = false; render(true);
   } catch(err){
     toast(errMsg(err), true);
