@@ -411,7 +411,7 @@ function editPage(){
       <button class="abtn" data-a="add" data-type="carrossel"><span class="plus">+</span>Carrossel</button>
       <button class="abtn" data-a="add" data-type="reels"><span class="plus">+</span>Reels</button>
       <button class="abtn" data-a="add" data-type="story"><span class="plus">+</span>Story</button>
-      ${posts.length > 1 ? `<button class="abtn ghost" data-a="sortdate">Ordenar por data e renumerar</button>` : ''}
+      ${posts.length > 1 ? `<span class="hint" style="margin-left:auto">Ao salvar, os conteúdos são ordenados por data e renumerados.</span>` : ''}
     </div>`;
   const list = posts.length ? posts.map((p,i) => ecard(p, i, posts.length)).join('') : `<div class="empty-edit">
       <span>Nenhum conteúdo ainda. Escolha o formato do primeiro:</span>
@@ -766,9 +766,16 @@ async function filesOfPlan(id){
   const { data } = await sb.storage.from(BUCKET).list(id, { limit: 1000 });
   return (data || []).map(f => `${id}/${f.name}`);
 }
+function sortByDate(){
+  // Data mais próxima primeiro; sem data vai para o fim, na ordem em que estava.
+  const list = [...cur.posts].sort((x,y) => (x.date || '9999-99-99').localeCompare(y.date || '9999-99-99') || (parseInt(x.num)||999) - (parseInt(y.num)||999));
+  list.forEach((q,k) => q.num = String(k + 1));
+  cur.posts = list;
+}
 async function save(){
   if(saving || !dirty || !cur) return;
   cur.posts.forEach(p => { p.num = String(p.num || '').trim(); p.videoUrl = (p.videoUrl || '').trim(); });
+  sortByDate();
   cur.client = cur.client.replace(/\s+/g, ' ').trim(); cur.period = cur.period.trim();
   if(!cur.client){ toast('Preencha o nome do cliente antes de salvar.', true); document.getElementById('f-client')?.focus(); return; }
   saving = true; paintStatus();
