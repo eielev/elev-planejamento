@@ -618,7 +618,9 @@ function startNew(){
   requestAnimationFrame(() => document.getElementById('f-client')?.focus());
 }
 function rowToPlan(row){
-  return normalize(Object.assign({}, row.data || {}, { id: row.id, client: row.client, period: row.period, createdAt: row.created_at }));
+  const plan = normalize(Object.assign({}, row.data || {}, { id: row.id, client: row.client, period: row.period, createdAt: row.created_at }));
+  plan.posts = sortPosts(plan.posts);
+  return plan;
 }
 async function openPlan(id, replace){
   resetWork();
@@ -799,12 +801,13 @@ async function filesOfPlan(id){
   const { data } = await sb.storage.from(BUCKET).list(id, { limit: 1000 });
   return (data || []).map(f => `${id}/${f.name}`);
 }
-function sortByDate(){
+function sortPosts(posts){
   // Data mais próxima primeiro; sem data vai para o fim, na ordem em que estava.
-  const list = [...cur.posts].sort((x,y) => (x.date || '9999-99-99').localeCompare(y.date || '9999-99-99') || (parseInt(x.num)||999) - (parseInt(y.num)||999));
+  const list = [...posts].sort((x,y) => (x.date || '9999-99-99').localeCompare(y.date || '9999-99-99') || (parseInt(x.num)||999) - (parseInt(y.num)||999));
   list.forEach((q,k) => q.num = String(k + 1));
-  cur.posts = list;
+  return list;
 }
+function sortByDate(){ cur.posts = sortPosts(cur.posts); }
 function reorderLive(id){
   const sig = () => cur.posts.map(p => p.id + ':' + p.num).join(',');
   const before = sig();
