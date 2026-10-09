@@ -38,6 +38,14 @@ export default {
         for (let i = 0; i < list.length; i += 1000) await env.MEDIA.delete(list.slice(i, i + 1000));
         return json({ deleted: list.length }, 200, cors);
       }
+      if (url.pathname === '/check') {
+        // Diagnóstico: testa as chaves do R2 enviando e apagando um arquivo minúsculo.
+        if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY) return json({ keys: 'faltando' }, 200, cors);
+        const r = await fetch(await presignPut(env, '_check/ping.txt', 60), { method: 'PUT', body: 'ok' });
+        const body = (await r.text()).slice(0, 300);
+        await env.MEDIA.delete('_check/ping.txt');
+        return json({ keys: 'presentes', putStatus: r.status, r2: body }, 200, cors);
+      }
       if (url.pathname === '/') return json({ ok: true, service: 'elev-midia' }, 200, cors);
       return json({ error: 'não encontrado' }, 404, cors);
     } catch (err) {
