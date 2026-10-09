@@ -12,8 +12,10 @@ const ELEV_PATH = "M65590.56 11845.83l-14230.17 0 -4963.13 17780.11 21556.14 0 -
 const elevSvg = cls => `<svg class="elev ${cls||''}" viewBox="0 0 95497.59 43650.14" role="img" aria-label="Elev"><path fill="currentColor" d="${ELEV_PATH}"/></svg>`;
 
 const TYPES = { post:'Post', carrossel:'Carrossel', reels:'Reels', story:'Story' };
-const MAX_VIDEO = 50 * 1024 * 1024;
-const CAP_BYTES = (cfg.STORAGE_GB || 1) * 1024 * 1024 * 1024;
+const MEDIA_BASE = (cfg.MEDIA_BASE || '').replace(/\/+$/, '');   // Cloudflare R2 (via Worker); vazio = Supabase Storage
+const MAX_VIDEO = MEDIA_BASE ? 2 * 1024 * 1024 * 1024 : 50 * 1024 * 1024;
+const MAX_VIDEO_LABEL = MEDIA_BASE ? '2 GB' : '50 MB';
+const CAP_BYTES = (cfg.STORAGE_GB || (MEDIA_BASE ? 10 : 1)) * 1024 * 1024 * 1024;
 const KEEP_PER_CLIENT = 2;
 const RESERVED = new Set(['p', 'editar', 'novo', 'planejamentos', 'login', 'sair', 'api', 'assets']);
 
@@ -40,12 +42,13 @@ const uid = () => rand(10);
 const newPlanId = () => 'p' + rand(21);
 
 const publicUrl = path => sb.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
-const src = p => !p ? '' : (blobUrls.get(p) || (/^(https?:|data:|blob:)/.test(p) ? p : publicUrl(p)));
+const isR2 = p => typeof p === 'string' && p.startsWith('r2:');
+const src = p => !p ? '' : (blobUrls.get(p) || (isR2(p) ? `${MEDIA_BASE}/m/${p.slice(3)}` : /^(https?:|data:|blob:)/.test(p) ? p : publicUrl(p)));
 const pad = n => String(n).padStart(2, '0');
 const mb = b => (b / 1024 / 1024).toFixed(1).replace('.', ',');
 const clientKey = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-const isVideo = p => /\.(mp4|webm)$/i.test(p || '');
+const isVideo = p => /\.(mp4|webm|mov)$/i.test(p || '');
 const slugify = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 const clientSlug = name => { let s = slugify(name) || 'cliente'; if(RESERVED.has(s)) s += '-cliente'; return s; };
@@ -511,13 +514,13 @@ function vidBlock(p){
   const id = p.id, vm = p.videoMode || 'link', story = p.type === 'story';
   return `<div class="vid">
       <span class="lbl">Vídeo${story ? ' (opcional)' : ''}</span>
-      <div class="seg" role="group" aria-label="Origem do vídeo"><button class="${vm==='link'?'on':''}" data-a="vmode" data-m="link">Link do Drive</button><button class="${vm==='file'?'on':''}" data-a="vmode" data-m="file">Arquivo até 50 MB</button></div>
+      <div class="seg" role="group" aria-label="Origem do vídeo"><button class="${vm==='link'?'on':''}" data-a="vmode" data-m="link">Link do Drive</button><button class="${vm==='file'?'on':''}" data-a="vmode" data-m="file">Arquivo até ${MAX_VIDEO_LABEL}</button></div>
       ${vm === 'link'
         ? `<input class="inp" id="vurl-${id}" data-f="videoUrl" value="${esc(p.videoUrl)}" placeholder="https://drive.google.com/file/d/…" inputmode="url" autocomplete="off">
            <p class="hint" id="vhint-${id}">${linkHint(p.videoUrl)}</p>`
         : (p.video
             ? `<div class="vid-file"><span>Vídeo enviado</span><button class="lnk danger" data-a="rm-video">Remover vídeo</button></div>`
-            : `<label class="drop" data-up="video" data-id="${id}" style="padding:12px"><span>Escolha um MP4 de até 50 MB</span><input type="file" accept="video/mp4,video/webm" data-up="video" data-id="${id}" id="up-video-${id}"></label>`)}
+            : `<label class="drop" data-up="video" data-id="${id}" style="padding:12px"><span>Escolha um vídeo MP4 de até ${MAX_VIDEO_LABEL}</span><input type="file" accept="video/mp4,video/webm,video/quicktime" data-up="video" data-id="${id}" id="up-video-${id}"></label>`)}
       ${!story && !p.video && !p.videoUrl ? `<p class="hint">Sem vídeo, o conteúdo aparece como <strong>Para gravar</strong>, com a capa e o roteiro.</p>` : ''}
       ${story ? `<p class="hint">Para stories em vídeo. O vídeo enviado aparece como a primeira tela; o link do Drive vira um botão abaixo das telas.</p>` : ''}
     </div>`;
@@ -562,7 +565,7 @@ async function processImage(file, { max = 1350, keepAlpha = false } = {}){
 }
 
 function addFile(blob, ext){
-  const path = `${cur.id}/${uid()}.${ext}`;
+  const path = (MEDIA_BASE ? 'r2:' : '') + `${cur.id}/${uid()}.${ext}`;
   pending.set(path, blob);
   cur.sizes[path] = blob.size;
   blobUrls.set(path, URL.createObjectURL(blob));
@@ -585,9 +588,9 @@ async function handleFiles(kind, id, fileList){
       dropPath(cur.logo); cur.logo = addFile(blob, ext);
     } else if(kind === 'video'){
       const v = files[0];
-      if(!/^video\/(mp4|webm)$/.test(v.type)) return toast('Use um vídeo MP4 ou WebM. Para outros formatos, suba no Drive e cole o link.', true);
-      if(v.size > MAX_VIDEO) return toast(`Esse vídeo tem ${mb(v.size)} MB e o limite é 50 MB. Suba no Google Drive e cole o link.`, true);
-      dropPath(p.video); p.video = addFile(v, v.type === 'video/webm' ? 'webm' : 'mp4'); p.videoUrl = '';
+      if(!/^video\/(mp4|webm|quicktime)$/.test(v.type)) return toast('Use um vídeo MP4. Para outros formatos, suba no Drive e cole o link.', true);
+      if(v.size > MAX_VIDEO) return toast(`Esse vídeo tem ${mb(v.size)} MB e o limite é ${MAX_VIDEO_LABEL}. Suba no Google Drive e cole o link.`, true);
+      dropPath(p.video); p.video = addFile(v, v.type === 'video/webm' ? 'webm' : v.type === 'video/quicktime' ? 'mov' : 'mp4'); p.videoUrl = '';
     } else {
       const imgs = files.filter(f => f.type.startsWith('image/')).sort((a,b) => (a.name||'').localeCompare(b.name||'', 'pt', { numeric:true }));
       if(!imgs.length) return toast('Esses arquivos não são imagens.', true);
@@ -777,7 +780,7 @@ window.addEventListener('beforeunload', e => { if(dirty){ e.preventDefault(); e.
 /* ---------- dados ---------- */
 function errMsg(err){
   const m = String(err?.message || err || '');
-  if(/jwt|auth|not authorized|permission|row-level/i.test(m)) return 'Sua sessão expirou. Entre de novo e salve outra vez.';
+  if(/jwt|auth|not authorized|permission|row-level|sessão/i.test(m)) return 'Sua sessão expirou. Entre de novo e salve outra vez.';
   if(/payload too large|exceeded the maximum|too large/i.test(m)) return 'Algum arquivo passou do limite de tamanho. Para vídeos grandes, use o link do Drive.';
   if(/fetch|network|failed to/i.test(m)) return 'Sem conexão com o servidor. Confira a internet e tente de novo.';
   return 'Não foi possível salvar agora. Suas alterações continuam aqui; tente de novo.';
@@ -791,15 +794,49 @@ async function loadIndex(){
   indexReady = true;
   if(view === 'home' || view === 'list') render(true); else updatePruneHint();
 }
+async function authHeader(){
+  const { data } = await sb.auth.getSession();
+  if(!data.session) throw new Error('auth: sessão expirada');
+  return 'Bearer ' + data.session.access_token;
+}
+async function mediaApi(path, body){
+  const r = await fetch(MEDIA_BASE + path, { method:'POST', headers:{ 'content-type':'application/json', authorization: await authHeader() }, body: JSON.stringify(body) });
+  if(r.status === 401) throw new Error('auth: sessão expirada');
+  if(!r.ok) throw new Error('falha ao falar com o servidor de arquivos (' + r.status + ')');
+  return r.json();
+}
+function putWithProgress(url, blob, onProgress){
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open('PUT', url);
+    if(blob.type) x.setRequestHeader('Content-Type', blob.type);
+    x.upload.onprogress = e => { if(e.lengthComputable) onProgress?.(e.loaded / e.total); };
+    x.onload = () => x.status >= 200 && x.status < 300 ? res() : rej(new Error('envio falhou (' + x.status + ')'));
+    x.onerror = () => rej(new Error('network: envio interrompido'));
+    x.send(blob);
+  });
+}
+// Envia um arquivo para onde a chave indica (R2 se começa com "r2:", senão Supabase Storage).
+async function uploadBlob(path, blob, onProgress){
+  if(isR2(path)){
+    const { url } = await mediaApi('/sign', { key: path.slice(3) });
+    await putWithProgress(url, blob, onProgress);
+    return;
+  }
+  const { error } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: blob.type || undefined, cacheControl: '31536000', upsert: true });
+  if(error) throw error;
+}
 async function removeFiles(paths){
   const list = [...new Set(paths)].filter(p => p && !/^(https?:|data:|blob:)/.test(p));
-  for(let i = 0; i < list.length; i += 100){
-    await sb.storage.from(BUCKET).remove(list.slice(i, i + 100));
-  }
+  const r2 = list.filter(isR2).map(p => p.slice(3)), sup = list.filter(p => !isR2(p));
+  for(let i = 0; i < sup.length; i += 100) await sb.storage.from(BUCKET).remove(sup.slice(i, i + 100));
+  if(r2.length && MEDIA_BASE) await mediaApi('/delete', { keys: r2 });
 }
-async function filesOfPlan(id){
+async function removePlanFolder(id){
   const { data } = await sb.storage.from(BUCKET).list(id, { limit: 1000 });
-  return (data || []).map(f => `${id}/${f.name}`);
+  const sup = (data || []).map(f => `${id}/${f.name}`);
+  if(sup.length) await sb.storage.from(BUCKET).remove(sup);
+  if(MEDIA_BASE) await mediaApi('/delete', { prefix: `${id}/` });
 }
 function sortPosts(posts){
   // Data mais próxima primeiro; sem data vai para o fim, na ordem em que estava.
@@ -834,9 +871,10 @@ async function save(){
     const uploads = [...pending.entries()];
     let done = 0;
     for(const [path, blob] of uploads){
-      const st = document.getElementById('st-t'); if(st) st.textContent = `Enviando arquivos… ${++done} de ${uploads.length}`;
-      const { error } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: blob.type || undefined, cacheControl: '31536000', upsert: true });
-      if(error) throw error;
+      done++;
+      const label = pct => { const st = document.getElementById('st-t'); if(st) st.textContent = `Enviando arquivos… ${done} de ${uploads.length}${pct != null && blob.size > 2e6 ? ` · ${Math.round(pct * 100)}%` : ''}`; };
+      label(null);
+      await uploadBlob(path, blob, label);
       pending.delete(path);
     }
     const media = mediaOf(cur);
@@ -851,9 +889,8 @@ async function save(){
     if(upErr) throw upErr;
     if(removed.size){ await removeFiles([...removed]); removed.clear(); }
     for(const r of prune){
-      const files = await filesOfPlan(r.id);
       await sb.from('plans').delete().eq('id', r.id);
-      await removeFiles(files);
+      await removePlanFolder(r.id).catch(() => {});
     }
     const wasNew = isNew;
     dirty = false; isNew = false;
@@ -879,9 +916,8 @@ async function importPlan(file){
     for(const [oldPath, dataUrl] of Object.entries(media)){
       const blob = await (await fetch(dataUrl)).blob();
       const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
-      const path = `${plan.id}/${uid()}.${ext}`;
-      const { error } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: blob.type, cacheControl: '31536000', upsert: true });
-      if(error) throw error;
+      const path = (MEDIA_BASE ? 'r2:' : '') + `${plan.id}/${uid()}.${ext}`;
+      await uploadBlob(path, blob);
       map[oldPath] = path; plan.sizes[path] = blob.size;
     }
     const fix = p => (p && map[p]) || p;
@@ -905,10 +941,9 @@ async function importPlan(file){
 async function deletePlan(id){
   const r = index.find(x => x.id === id); if(!r) return;
   try {
-    const files = await filesOfPlan(id);
     const { error } = await sb.from('plans').delete().eq('id', id);
     if(error) throw error;
-    await removeFiles(files);
+    await removePlanFolder(id).catch(() => {});
     toast(`Planejamento de ${r.client || 'cliente sem nome'} excluído.`);
     await loadIndex();
   } catch(err){ toast(errMsg(err), true); }
