@@ -13,5 +13,7 @@ SUPABASE_URL = "https://oiewmoahigcwyjwawlak.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pZXdtb2FoaWdjd3lqd2F3bGFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE1MjU5ODAsImV4cCI6MjEwNzEwMTk4MH0.mixyiUOQlIZUCPNNGcHjIGk-_FHFlshhUgCF1FXN7Aw"
 R2_BUCKET = "elev-planejamento"
 R2_ACCOUNT_ID = "8355de25be4d80c815ba719ee7218d6f"
+TRELLO_BOARD = "8T7zFGHO"
+TRELLO_LIST_NAME = "PUBLICAR/AGENDAR"
 ALLOWED_ORIGINS = "https://planejamento.eielev.com.br,https://elev-planejamento.vercel.app"
-# Segredos (definir no painel da Cloudflare, nunca aqui): R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+# Segredos (definir no painel da Cloudflare, nunca aqui): R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, TRELLO_KEY, TRELLO_TOKEN

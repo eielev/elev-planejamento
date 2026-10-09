@@ -378,3 +378,8 @@ img{max-width:100%}
 .branded .car-dots span.on{background:var(--brand)}
 .branded .clogo{border-color:color-mix(in srgb, var(--brand) 35%, var(--line))}
 .branded th{background:color-mix(in srgb, var(--brand2) 10%, var(--surface))}
+
+.trello-box{display:flex; gap:16px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-top:14px; padding:14px 16px; border:1px solid var(--line-strong); border-radius:var(--r); background:var(--card)}
+.trello-txt{display:flex; flex-direction:column; gap:2px; min-width:0; flex:1 1 280px; font-size:13.5px}
+.trello-txt span{color:var(--muted)}
+.trello-act{display:flex; gap:10px; align-items:center; flex-wrap:wrap}

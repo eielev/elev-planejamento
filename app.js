@@ -466,7 +466,8 @@ function editPage(){
           <div class="fld"><span class="lbl">Link fixo do cliente${latest ? '' : ' · mostra o planejamento mais recente'}</span>${cf(fixedLinkFor(slug), 'link fixo')}</div>
           <div class="fld"><span class="lbl">Link só deste planejamento</span>${cf(linkFor(P.id), 'link deste planejamento')}</div>
         </div>
-        <p class="hint">O link fixo sempre abre o planejamento mais recente deste cliente. Mande ele uma vez e o cliente pode salvar nos favoritos.</p>`}
+        <p class="hint">O link fixo sempre abre o planejamento mais recente deste cliente. Mande ele uma vez e o cliente pode salvar nos favoritos.</p>
+        ${MEDIA_BASE ? trelloBox(P) : ''}`}
   </div></div></section>`;
   const add = extra => `<div class="addbar" ${extra||''}><span class="lbl">Novo conteúdo</span>
       <button class="abtn" data-a="add" data-type="post"><span class="plus">+</span>Post</button>
@@ -659,6 +660,7 @@ async function handleFiles(kind, id, fileList){
 
 /* ---------- abrir, criar, sair ---------- */
 function resetWork(){
+  trelloArm = false; trelloBusy = false;
   pending.clear(); removed.clear(); dirty = false; saving = false; activeId = null; preview = false; leaveAsk = false;
 }
 function startNew(){
@@ -738,6 +740,9 @@ app.addEventListener('click', e => {
     case 'open': openPlan(planId); break;
     case 'copy': { const r = index.find(x => x.id === planId); if(r) copyText(bestLink(r)); break; }
     case 'copytext': copyText(t.dataset.text, t); break;
+    case 'trello-arm': if(dirty){ toast('Salve as alterações antes de mandar para o Trello.', true); break; } trelloArm = true; render(true); break;
+    case 'trello-cancel': trelloArm = false; render(true); break;
+    case 'trello-go': sendToTrello(); break;
     case 'prune-pick': {
       if(t.checked) pruneAsk.selected.add(t.value); else pruneAsk.selected.delete(t.value);
       render(true); break;
@@ -1049,6 +1054,64 @@ async function showClientPlan(fn, arg){
   const { data, error } = await sb.rpc(fn, fn === 'get_plan' ? { p_id: arg } : { p_slug: arg });
   if(error || !data){ cur = null; view = 'none'; render(false); return; }
   cur = rowToPlan(data); view = 'client'; render(false);
+}
+
+/* ---------- Trello ---------- */
+let trelloArm = false, trelloBusy = false;
+function trelloCardsOf(P){ return P.trello?.cards || {}; }
+function trelloBox(P){
+  const cards = trelloCardsOf(P);
+  const linked = P.posts.filter(p => cards[p.id]).length;
+  const approved = P.trello?.approvedAt;
+  const n = P.posts.length;
+  let action;
+  if(trelloBusy) action = `<button class="sbtn dark" disabled>Enviando para o Trello…</button>`;
+  else if(trelloArm) action = `<button class="sbtn dark" data-a="trello-go">${approved ? `Atualizar ${n} card${n === 1 ? '' : 's'}` : `Criar ${n} card${n === 1 ? '' : 's'} em PUBLICAR/AGENDAR`}</button><button class="lnk" data-a="trello-cancel">Cancelar</button>`;
+  else action = `<button class="sbtn ${approved ? '' : 'dark'}" data-a="trello-arm" ${n ? '' : 'disabled'}>${approved ? 'Atualizar cards no Trello' : 'Cliente aprovou → criar cards no Trello'}</button>`;
+  return `<div class="trello-box">
+    <div class="trello-txt">${approved
+      ? `<b>✓ Aprovado em ${esc(fmtCreated(approved).split(' · ')[0])}</b><span>${linked} de ${n} conteúdo${n === 1 ? '' : 's'} com card no Trello${linked < n ? ' · os que faltam são criados ao atualizar' : ''}.</span>`
+      : `<b>Aprovação</b><span>Quando o cliente aprovar, crie um card por conteúdo no quadro Elev, com a data de publicação como entrega.</span>`}</div>
+    <div class="trello-act">${action}</div>
+  </div>`;
+}
+function trelloCardName(P, p){ return `${(P.client || '').toUpperCase()} ${p.num ? pad(p.num) : '–'} ${TYPES[p.type].toUpperCase()}`; }
+function trelloDesc(P, p){
+  const parts = [];
+  if(p.caption) parts.push(p.caption.trim());
+  if(p.script) parts.push('**Roteiro**\n' + p.script.trim());
+  if(p.videoUrl) parts.push('Vídeo: ' + p.videoUrl);
+  parts.push('---\nPlanejamento: ' + linkFor(P.id));
+  return parts.join('\n\n');
+}
+function absUrl(path){ const u = src(path); return /^https:\/\//.test(u) ? u : ''; }
+async function sendToTrello(){
+  if(!cur || trelloBusy) return;
+  if(dirty){ toast('Salve as alterações antes de mandar para o Trello.', true); return; }
+  trelloBusy = true; trelloArm = false; render(true);
+  try {
+    const known = trelloCardsOf(cur);
+    const cards = sortPosts(cur.posts).map(p => ({
+      postId: p.id, cardId: known[p.id]?.id || null,
+      name: trelloCardName(cur, p), desc: trelloDesc(cur, p),
+      due: p.date ? `${p.date}T15:00:00.000Z` : null,
+      coverUrl: absUrl(p.type === 'reels' ? p.cover : p.images[0])
+    }));
+    const res = await mediaApi('/trello/cards', { cards });
+    if(res.error) throw new Error(res.error);
+    const map = Object.assign({}, known);
+    let ok = 0; const fails = [];
+    for(const r of res.results || []){ if(r.ok){ map[r.postId] = { id: r.cardId, url: r.url }; ok++; } else fails.push(r.error); }
+    const first = !cur.trello?.approvedAt;
+    cur.trello = { approvedAt: cur.trello?.approvedAt || new Date().toISOString(), cards: map };
+    dirty = true; trelloBusy = false;
+    await save();
+    if(fails.length) toast(`${ok} card${ok === 1 ? '' : 's'} ok, ${fails.length} com erro. Detalhe: ${fails[0]}`, true, 12000);
+    else toast(first ? `${ok} card${ok === 1 ? '' : 's'} criado${ok === 1 ? '' : 's'} em ${res.list}.` : `${ok} card${ok === 1 ? '' : 's'} atualizado${ok === 1 ? '' : 's'} no Trello.`, false, 5000);
+  } catch(err){
+    trelloBusy = false; render(true);
+    toast('Não foi possível falar com o Trello. Detalhe: ' + String(err?.message || err).slice(0, 160), true, 12000);
+  }
 }
 
 /* ---------- clientes ---------- */

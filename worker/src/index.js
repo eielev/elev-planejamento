@@ -38,6 +38,16 @@ export default {
         for (let i = 0; i < list.length; i += 1000) await env.MEDIA.delete(list.slice(i, i + 1000));
         return json({ deleted: list.length }, 200, cors);
       }
+      if (request.method === 'POST' && url.pathname === '/trello/cards') {
+        await requireTeam(request, env);
+        const { cards = [] } = await request.json();
+        return json(await trelloSync(env, cards.slice(0, 100)), 200, cors);
+      }
+      if (url.pathname === '/trello/check') {
+        if (!env.TRELLO_KEY || !env.TRELLO_TOKEN) return json({ keys: 'faltando' }, 200, cors);
+        try { const list = await trelloList(env); return json({ keys: 'presentes', list: list.name }, 200, cors); }
+        catch (e) { return json({ keys: 'presentes', erro: String(e.message).slice(0, 200) }, 200, cors); }
+      }
       if (url.pathname === '/check') {
         // Diagnóstico: testa as chaves do R2 enviando e apagando um arquivo minúsculo.
         if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY) return json({ keys: 'faltando' }, 200, cors);
@@ -128,4 +138,48 @@ async function presignPut(env, key, expires) {
   k = await hmac(k, 'auto'); k = await hmac(k, 's3'); k = await hmac(k, 'aws4_request');
   const sig = hex(await hmac(k, toSign));
   return `https://${host}${path}?${query}&X-Amz-Signature=${sig}`;
+}
+
+/* ---- Trello: cria/atualiza um card por conteúdo do planejamento ---- */
+const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, '');
+async function trello(env, method, path, params = {}) {
+  const u = new URL('https://api.trello.com/1' + path);
+  u.searchParams.set('key', env.TRELLO_KEY); u.searchParams.set('token', env.TRELLO_TOKEN);
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) u.searchParams.set(k, String(v));
+  const r = await fetch(u, { method, headers: { accept: 'application/json' } });
+  const text = await r.text();
+  if (!r.ok) throw Object.assign(new Error(`Trello ${r.status}: ${text.slice(0, 150)}`), { status: r.status });
+  return text ? JSON.parse(text) : {};
+}
+async function trelloList(env) {
+  const lists = await trello(env, 'GET', `/boards/${env.TRELLO_BOARD}/lists`, { fields: 'name' });
+  const want = norm(env.TRELLO_LIST_NAME);
+  const list = lists.find(l => norm(l.name) === want) || lists.find(l => norm(l.name).includes(want.split('/')[0]));
+  if (!list) throw new Error(`lista "${env.TRELLO_LIST_NAME}" não encontrada no quadro`);
+  return list;
+}
+async function trelloSync(env, cards) {
+  if (!env.TRELLO_KEY || !env.TRELLO_TOKEN) return { error: 'chaves do Trello não configuradas no Worker' };
+  const list = await trelloList(env);
+  const results = [];
+  for (const c of cards) {
+    const fields = { name: String(c.name || '').slice(0, 300), desc: String(c.desc || '').slice(0, 15000), due: c.due || null };
+    try {
+      let card = null;
+      if (c.cardId) {
+        try { card = await trello(env, 'PUT', `/cards/${c.cardId}`, fields); }
+        catch (e) { if (e.status !== 404 && e.status !== 400) throw e; }
+      }
+      if (!card) {
+        card = await trello(env, 'POST', '/cards', { ...fields, idList: list.id, pos: 'bottom' });
+        if (c.coverUrl && /^https:\/\//.test(c.coverUrl)) {
+          try { await trello(env, 'POST', `/cards/${card.id}/attachments`, { url: c.coverUrl, name: 'arte' }); } catch (e) {}
+        }
+      }
+      results.push({ postId: c.postId, ok: true, cardId: card.id, url: card.shortUrl || card.url });
+    } catch (e) {
+      results.push({ postId: c.postId, ok: false, error: String(e.message).slice(0, 200) });
+    }
+  }
+  return { list: list.name, results };
 }
