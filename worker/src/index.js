@@ -162,7 +162,8 @@ async function trelloSync(env, cards) {
   if (!env.TRELLO_KEY || !env.TRELLO_TOKEN) return { error: 'chaves do Trello não configuradas no Worker' };
   const list = await trelloList(env);
   const results = [];
-  for (const c of cards) {
+  // Cards novos entram no topo da lista; percorre de trás para frente para o 01 ficar em primeiro.
+  for (const c of [...cards].reverse()) {
     const fields = { name: String(c.name || '').slice(0, 300), desc: String(c.desc || '').slice(0, 15000), due: c.due || null };
     try {
       let card = null;
@@ -171,7 +172,7 @@ async function trelloSync(env, cards) {
         catch (e) { if (e.status !== 404 && e.status !== 400) throw e; }
       }
       if (!card) {
-        card = await trello(env, 'POST', '/cards', { ...fields, idList: list.id, pos: 'bottom' });
+        card = await trello(env, 'POST', '/cards', { ...fields, idList: list.id, pos: 'top' });
         if (c.coverUrl && /^https:\/\//.test(c.coverUrl)) {
           try { await trello(env, 'POST', `/cards/${card.id}/attachments`, { url: c.coverUrl, name: 'arte' }); } catch (e) {}
         }
