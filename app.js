@@ -87,6 +87,29 @@ function toast(msg, err, ms){
   clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, ms || (err ? 6500 : 3000));
 }
 
+const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+function periodExample(){ const m = new Date().getMonth(); return `Ex.: ${MONTHS[m]} / ${MONTHS[(m + 1) % 12]}`; }
+function isoToBr(iso){ const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; }
+// Aceita 13/10, 13-10, 13.10, 1310, 13/10/27, 13/10/2027. Sem ano: ano atual
+// (ou o seguinte, se a data já tiver passado há mais de 60 dias, ex.: janeiro digitado em dezembro).
+function parseBrDate(raw){
+  let d, mo, y;
+  const t = raw.replace(/\s+/g, '');
+  let m = /^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2}|\d{4}))?$/.exec(t);
+  if(m){ d = +m[1]; mo = +m[2]; y = m[3]; }
+  else if((m = /^(\d{2})(\d{2})(\d{2}|\d{4})?$/.exec(t))){ d = +m[1]; mo = +m[2]; y = m[3]; }
+  else return null;
+  const now = new Date();
+  if(y) y = y.length === 2 ? 2000 + +y : +y;
+  else {
+    y = now.getFullYear();
+    const cand = new Date(y, mo - 1, d), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if((today - cand) / 86400000 > 60) y += 1;
+  }
+  const dt = new Date(y, mo - 1, d);
+  if(dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+  return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
 function markDirty(){ dirty = true; leaveAsk = false; paintStatus(); updatePruneHint(); }
 const COPY_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5"/></svg>';
 const OK_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>';
@@ -391,7 +414,7 @@ function editPage(){
   const cf = (text, label) => `<div class="copyfield"><code>${esc(text)}</code><button class="cbtn" data-a="copytext" data-text="${esc(text)}" aria-label="Copiar ${label}" title="Copiar">${COPY_ICON}</button></div>`;
   const setup = `<section><div class="wrap"><div class="setup">
     <div class="fld"><label class="lbl" for="f-client">Cliente</label><input class="inp big" id="f-client" data-g="client" value="${esc(P.client)}" autocomplete="off"></div>
-    <div class="fld"><label class="lbl" for="f-period">Mês ou período</label><input class="inp big" id="f-period" data-g="period" value="${esc(P.period)}" placeholder="Ex.: Outubro / Novembro" autocomplete="off"></div>
+    <div class="fld"><label class="lbl" for="f-period">Mês ou período</label><input class="inp big" id="f-period" data-g="period" value="${esc(P.period)}" placeholder="${esc(periodExample())}" autocomplete="off"></div>
     <div class="fld"><span class="lbl">Logo (opcional)</span>
       <label class="drop logo-drop" data-up="logo">${P.logo ? `<img src="${esc(src(P.logo))}" alt="Logo do cliente">` : '<span>Arraste ou <strong>escolha</strong></span>'}<input type="file" accept="image/*" data-up="logo" id="up-logo"></label>
       ${P.logo ? `<div class="mini-actions"><button class="lnk danger" data-a="rm-logo">Remover logo</button></div>` : ''}
@@ -431,7 +454,7 @@ function ecard(p, i, total){
   return `<article class="ecard ${activeId === id ? 'active' : ''}" id="c-${id}" data-card="${id}">
     <div class="ehead">
       <label><span class="lbl">Nº</span><input class="inp in-num" id="num-${id}" data-f="num" value="${esc(p.num)}" inputmode="numeric" aria-label="Número do conteúdo"></label>
-      <label><span class="lbl">Data</span><input class="inp in-date" type="date" id="date-${id}" data-f="date" value="${esc(p.date)}"></label>
+      <label><span class="lbl">Data</span><input class="inp in-date" type="text" inputmode="numeric" id="date-${id}" data-f="dateTxt" value="${esc(isoToBr(p.date))}" placeholder="dd/mm" aria-label="Data (dia/mês, ano opcional)" autocomplete="off"></label>
       <div class="seg" role="group" aria-label="Formato">${Object.entries(TYPES).map(([k,v]) => `<button class="${p.type===k?'on':''}" data-a="type" data-type="${k}">${v}</button>`).join('')}</div>
       <div class="etools">
         <button class="ibtn" data-a="up" title="Mover para cima" aria-label="Mover para cima" ${i===0?'disabled':''}>↑</button>
@@ -699,6 +722,7 @@ app.addEventListener('input', e => {
   if(!cur) return;
   if(el.dataset.g){ cur[el.dataset.g] = el.value; markDirty(); return; }
   const f = el.dataset.f; if(!f) return;
+  if(f === 'dateTxt'){ el.classList.remove('bad'); markDirty(); return; }
   const p = getPost(el.closest('[data-card]')?.dataset.card); if(!p) return;
   p[f] = el.value;
   if(f === 'videoUrl'){ const h = document.getElementById('vhint-' + p.id); if(h) h.innerHTML = linkHint(el.value.trim()); }
@@ -710,6 +734,14 @@ app.addEventListener('change', e => {
   if(el.type === 'file' && el.dataset.up === 'import'){ importPlan(el.files[0]); el.value = ''; return; }
   if(el.type === 'file' && el.dataset.up){ handleFiles(el.dataset.up, el.dataset.id, el.files); el.value = ''; return; }
   if(el.dataset.f === 'num'){ render(true); }
+  if(el.dataset.f === 'dateTxt'){
+    const p = getPost(el.closest('[data-card]')?.dataset.card); if(!p) return;
+    const raw = el.value.trim();
+    if(!raw){ p.date = ''; el.classList.remove('bad'); markDirty(); return; }
+    const iso = parseBrDate(raw);
+    if(!iso){ el.classList.add('bad'); toast('Data não reconhecida. Use dia/mês, por exemplo 13/10 ou 13/10/27.', true); return; }
+    p.date = iso; el.value = isoToBr(iso); el.classList.remove('bad'); markDirty();
+  }
   if(el.dataset.f === 'videoUrl'){ const p = getPost(el.closest('[data-card]')?.dataset.card); if(p){ p.videoUrl = el.value.trim(); if(p.videoUrl && p.video){ dropPath(p.video); p.video = null; } render(true); } }
 });
 app.addEventListener('focusin', e => {
